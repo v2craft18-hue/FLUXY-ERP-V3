@@ -2332,15 +2332,22 @@ function _usuarioToSb(userObj){
   };
 }
 
-async function _usuarioFromSb(row){
+function _usuarioFromSb(row){
   // Converte linha Supabase (snake_case) → local (camelCase)
+  // NOTA: função síncrona. Era async e o .map() sem await gravava
+  // Promises no localStorage → JSON.stringify(Promise) = {} → tela
+  // Usuários exibia "undefined" e a lista sumia após F5.
   if(!row) return null;
   return {
     id:            row.legacy_id || row.id || '',
     nome:          row.nome || '',
     email:         row.email || '',
     role:          row.role || 'vend',
-    telefone:      row.telefone || ''
+    telefone:      row.telefone || '',
+    empresaId:     row.empresa_id || '',
+    ativo:         (row.ativo !== false),
+    status:        row.status || 'ativo',
+    deleted:       (row.deleted === true)
   };
 }
 
@@ -2359,7 +2366,16 @@ async function loadUsuariosFromSb(){
       return;
     }
     
-    var usuários = (data || []).map(function(row){ return _usuarioFromSb(row); });
+    var usuários = (data || []).map(function(row){ return _usuarioFromSb(row); }).filter(Boolean);
+    // Preserva o hash de senha do cache local (o banco não guarda pwd;
+    // sem isso a sobrescrita apagaria o login offline).
+    var cacheAntigo = stor_get(KEYS.users) || [];
+    usuários.forEach(function(u){
+      for(var i=0;i<cacheAntigo.length;i++){
+        var c=cacheAntigo[i];
+        if(c && c.pwd && ((c.email && c.email===u.email) || (c.id && c.id===u.id))){ u.pwd=c.pwd; break; }
+      }
+    });
     stor_set(KEYS.users, usuários);
     console.log('[Fluxy/USU] '+usuários.length+' usuários carregados do Supabase');
   } catch(e) {
@@ -2922,6 +2938,7 @@ function _prodToSb(prodObj){
   // Converte objeto local (camelCase) → formato Supabase (snake_case + empresa_id)
   if(!prodObj || !SESS) return null;
   return {
+    id:           prodObj.id,
     empresa_id:   SESS.empresaId,
     nome:         prodObj.nome || '',
     descricao:    prodObj.descricao || '',
@@ -12137,6 +12154,11 @@ async function _rotaFromSb(row){
 async function migrateDataToSb(){
   // Orquestra migração de todos 6 módulos
   if(!CLOUD_ENABLED || !_sb || !SESS) return;
+  
+  // Restaura o estado persistido (era gravado no stor_set abaixo mas NUNCA
+  // relido — a cada F5 voltava a false e a migração re-rodava inteira).
+  var _migSalvo = stor_get('migration_state');
+  if(_migSalvo) APP_STATE.migration_state = Object.assign({}, APP_STATE.migration_state, _migSalvo);
   
   APP_STATE.migration_report = { total: 0, migrada: 0, ignorada: 0, atualizada: 0, erro: 0, detalhes: [] };
   console.log('[Fluxy/MIG] Iniciando migração automática de dados locais...');
