@@ -3027,37 +3027,29 @@ async function loadProdsFromSb(){
 }
 
 async function _prodUpsertSb(prodObj){
-  // Insert ou update de 1 produto no Supabase (async, sem bloquear UI)
-  if(!CLOUD_ENABLED || !_sb || !SESS) return null;
-  var sbObj = _prodToSb(prodObj);
-  if(!sbObj) return null;
-  
-  try {
-    // Se tem ID, é update; senão, é insert
-    var { data, error } = prodObj.id && prodObj.id.length > 20
-      ? await _sb
-          .from('produtos')
-          .update(sbObj)
-          .eq('id', prodObj.id)
-          .eq('empresa_id', SESS.empresaId)
-          .select()
-          .single()
-      : await _sb
-          .from('produtos')
-          .insert([{ ...sbObj, id: prodObj.id }])
-          .select()
-          .single();
-    
-    if(error) {
-      console.error('[Fluxy/PROD] Erro ao upsert produto:', error.message);
-      return null;
-    }
-    console.log('[Fluxy/PROD] Produto '+prodObj.id+' salvo no Supabase');
-    return data ? _prodFromSb(data) : null;
-  } catch(e) {
-    console.error('[Fluxy/PROD] Erro inesperado em _prodUpsertSb:', e.message);
-    return null;
-  }
+     // Insert ou update de 1 produto no Supabase (async, sem bloquear UI)
+     if(!CLOUD_ENABLED || !_sb || !SESS) return null;
+     var sbObj = _prodToSb(prodObj);
+     if(!sbObj) return null;
+
+     try {
+            // Upsert por id: cria se não existir, atualiza se já existir (corrige bug de duplicação de produtos)
+            var { data, error } = await _sb
+                .from('produtos')
+                .upsert({ ...sbObj, id: prodObj.id, empresa_id: SESS.empresaId }, { onConflict: 'id' })
+                .select()
+                .single();
+
+            if(error) {
+                     console.error('[Fluxy/PROD] Erro ao upsert produto:', error.message);
+                     return null;
+            }
+            console.log('[Fluxy/PROD] Produto '+prodObj.id+' salvo no Supabase');
+            return data ? _prodFromSb(data) : null;
+     } catch(e) {
+            console.error('[Fluxy/PROD] Erro inesperado em _prodUpsertSb:', e.message);
+            return null;
+     }
 }
 
 async function _prodDeleteSb(id){
