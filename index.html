@@ -2384,38 +2384,48 @@ async function loadUsuariosFromSb(){
 }
 
 async function _usuarioUpsertSb(usuarioObj){
-  // Insert ou update de usuário no Supabase (async)
-  if(!CLOUD_ENABLED || !_sb || !SESS) return null;
-  var sbObj = _usuarioToSb(usuarioObj);
-  if(!sbObj) return null;
-  
-  try {
-    // Upsert usuário
-    var { data, error } = usuarioObj.id && usuarioObj.id.length > 5
-      ? await _sb
-          .from('usuarios')
-          .update(sbObj)
-          .eq('legacy_id', usuarioObj.id)
-          .eq('empresa_id', SESS.empresaId)
-          .select()
-          .single()
-      : await _sb
-          .from('usuarios')
-          .insert([{ ...sbObj }])
-          .select()
-          .single();
-    
-    if(error) {
-      console.error('[Fluxy/USU] Erro ao upsert usuário:', error.message);
-      return null;
-    }
-    console.log('[Fluxy/USU] Usuário '+usuarioObj.email+' salvo no Supabase');
-    return data;
-  } catch(e) {
-    console.error('[Fluxy/USU] Erro inesperado em _usuarioUpsertSb:', e.message);
-    return null;
-  }
-}
+     // Insert ou update de usuário no Supabase (async)
+     if(!CLOUD_ENABLED || !_sb || !SESS) return null;
+     var sbObj = _usuarioToSb(usuarioObj);
+     if(!sbObj) return null;
+
+     try {
+       // Verifica se já existe um registro vinculado a este id local antes de decidir insert/update
+       var existing = null;
+       if(usuarioObj.id){
+         var achou = await _sb
+           .from('usuarios')
+           .select('id')
+           .eq('legacy_id', usuarioObj.id)
+           .eq('empresa_id', SESS.empresaId)
+           .maybeSingle();
+         existing = achou.data;
+   }
+       // Upsert usuário
+       var { data, error } = existing
+         ? await _sb
+             .from('usuarios')
+             .update(sbObj)
+             .eq('id', existing.id)
+             .select()
+             .single()
+         : await _sb
+             .from('usuarios')
+             .insert([{ ...sbObj }])
+             .select()
+             .single();
+
+       if(error) {
+         console.error('[Fluxy/USU] Erro ao upsert usuário:', error.message);
+         return null;
+   }
+       console.log('[Fluxy/USU] Usuário '+usuarioObj.email+' salvo no Supabase');
+       return data;
+   } catch(e) {
+       console.error('[Fluxy/USU] Erro inesperado em _usuarioUpsertSb:', e.message);
+       return null;
+   }
+   }
 
 async function _usuarioDeleteSb(id){
   // Soft delete (deleted=true) no Supabase
