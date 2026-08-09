@@ -2433,7 +2433,7 @@ async function _usuarioDeleteSb(id){
   try {
     var { error } = await _sb
       .from('usuarios')
-      .update({ deleted: true, deleted_at: new Date().toISOString() })
+      .update({ deleted: true, deleted_at: new Date().toISOString(), ativo: false, status: 'desligado' })
       .eq('legacy_id', id)
       .eq('empresa_id', SESS.empresaId);
     
@@ -11971,6 +11971,7 @@ function confirmDeleteUser(id){
   // Soft delete em lugar de hard delete
   users[idx].deleted=true;
   users[idx].deletedAt=new Date().toISOString();
+   users[idx].ativo=false; users[idx].status='desligado';
   saveUsers(users);
   // Sincroniza exclusão com Supabase (async, sem bloquear)
   if(CLOUD_ENABLED && id) _usuarioDeleteSb(id).catch(function(e){ console.error('[Fluxy/USU] erro em _usuarioDeleteSb:', e); });
