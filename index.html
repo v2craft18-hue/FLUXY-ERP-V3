@@ -13667,7 +13667,28 @@ if(typeof supabase !== 'undefined' && window.location.hostname !== 'localhost') 
 seedAdmin();
 seed();
 loadSession();
-
+async function _verifyCloudSessionOnBoot(){
+   if(!CLOUD_ENABLED || !_sb || !SESS) return;
+   if(!navigator.onLine) return;
+   var ok = await _hasSupabaseSession();
+   if(!ok){
+      try{
+         var r = await _sb.auth.refreshSession();
+         ok = !!(r && r.data && r.data.session);
+      }catch(_){ ok = false; }
+   }
+   if(!ok){
+      console.warn('[Fluxy/AUTH] Sessao da nuvem expirada, forcando novo login para retomar sincronizacao.');
+   try{
+   var banner = document.createElement('div');
+   banner.textContent = 'Sessao expirada. Faca login novamente para sincronizar seus dados na nuvem.';
+   banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;text-align:center;padding:10px;font-weight:600;font-family:sans-serif;';
+   document.body.appendChild(banner);
+   }catch(_){}
+   setTimeout(function(){ doLogout(); }, 2500);
+   }
+   }
+   _verifyCloudSessionOnBoot();
 if(SESS){
   // Carrega dados da nuvem quando disponível (Etapa 3+: clientes, produtos, pedidos, cobranças, rotas, usuários)
   if(CLOUD_ENABLED) {
