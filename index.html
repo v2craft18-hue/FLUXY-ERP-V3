@@ -4453,7 +4453,7 @@ function applyRoleNav(){
   }
 
   // ADM-only nav items
-  sd('nav-usuarios', adm);
+  sd('nav-usuarios', adm||ger);
   sd('nav-notas',    adm);
   sd('nav-rotas',    true); // visible to all roles
 
@@ -5026,11 +5026,11 @@ function go(v){
   // Permitir acesso a signup e login sem autenticação
   if(!SESS && v!=='signup' && v!=='reset-pwd'){ return; }
   // Permission checks
-  if((v==='usuarios'||v==='notas') && !isAdm()){ toast('Sem permissão.'); return; }
+  if(v==='usuarios' && !isAdm() && !isGer()){ toast('Sem permissão.'); return; } if(v==='notas' && !isAdm()){ toast('Sem permissão.'); return; }
   if(v==='rotas'&&!isAdm()&&!isGer()&&!isEntr()){ toast('Sem permissão.'); return; }
   if(v==='configuracoes'&&!isAdm()){ toast('Sem permissão.','err'); return; }
   if(v==='gerente' && isEntr()){ toast('Sem permissão.'); return; }
-  if(isGer() && (v==='usuarios'||v==='comissoes')){ toast('Sem permissão.'); return; }
+  if(isGer() && v==='comissoes'){ toast('Sem permissão.'); return; }
   if(v==='entregas'){ v='rotas'; }
   if(v==='cobranças' && isEntr()){ toast('Sem permissão.'); return; }
   if((v==='historico'||v==='pedidos') && isEntr()){ toast('Sem permissão.'); return; }
@@ -11733,7 +11733,7 @@ function renderUsuarios(){
   try {
   // View guard: abort if user navigated away
   if(currentView!=='usuarios') return;
-  if(!isAdm()){go('dashboard');return;}
+  if(!isAdm()&&!isGer()){go('dashboard');return;}
   var users=getUsers().filter(function(u){return !u.deleted;});
   var list=[];
   for(var i=0;i<users.length;i++){
@@ -11831,106 +11831,7 @@ function renderUsuarios(){
   }
 }
 
-function openUserModal(editId){
-  if(!isAdm()) return;
-  editId=editId||null;
-  var users=getUsers();
-  var u=null;
-  if(editId){for(var i=0;i<users.length;i++) if(users[i].id===editId){u=users[i];break;}}
-  var curStatus=u?(u.status||( u.ativo===false?'bloqueado':'ativo')):'ativo';
-  var pwdFields=u?''
-    :'<div class="field"><label>SENHA *</label><input type="password" id="uu-pwd" placeholder="Mínimo 6 caracteres"></div>'
-    +'<div class="field"><label>CONFIRMAR SENHA *</label><input type="password" id="uu-pwd2" placeholder="Repita"></div>';
-  var html='<div class="modal-title">'+(u?'��️ Editar':'➕ Novo')+' Usuário</div>'
-    +'<div class="field"><label>NOME *</label><input id="uu-nome" value="'+(u?u.nome||'':'')+'" placeholder="Nome completo"></div>'
-    +'<div class="field"><label>E-MAIL *</label><input id="uu-email" type="email" value="'+(u?u.email||'':'')+'" placeholder="email@empresa.com"></div>'
-    +'<div class="field"><label>TELEFONE</label><input id="uu-tel" value="'+(u?u.telefone||'':'')+'" placeholder="(00) 00000-0000"></div>'
-    +pwdFields
-    +'<div class="field"><label>TIPO</label><select id="uu-role">'
-      +'<option value="ger"'+(u&&u.role==='ger'?' selected':'')+'>👔 Gerente</option>'
-      +'<option value="vend"'+(u&&u.role==='vend'?' selected':'')+'>Vendedor</option>'
-      +'<option value="entr"'+(u&&u.role==='entr'?' selected':'')+'>Entregador</option>'
-      +'<option value="adm"'+(u&&u.role==='adm'?' selected':'')+'>Administrador</option>'
-    +'</select></div>'
-    +'<div class="field"><label>STATUS DE ACESSO</label><select id="uu-status">'
-      +'<option value="ativo"'+(curStatus==='ativo'?' selected':'')+'>✅ Ativo — acesso liberado</option>'
-      +'<option value="bloqueado"'+(curStatus==='bloqueado'?' selected':'')+'>🚫 Bloqueado — não consegue logar</option>'
-      +'<option value="desligado"'+(curStatus==='desligado'?' selected':'')+'>❌ Desligado — acesso removido</option>'
-    +'</select></div>'
-    +'<div id="uu-err" class="alert err"></div>'
-    +'<div class="modal-foot">'
-      +'<button class="btn btn-g" onclick="closeModal()">Cancelar</button>'
-      +'<button class="btn btn-p" data-id="'+(editId||'')+'" onclick="saveUser(this.dataset.id)">💾 '+(u?'Atualizar':'Cadastrar')+'</button>'
-    +'</div>';
-  openModal(html);
-}
-
-function saveUser(editId){
-  if(!requireAdm()) return;
-  if(!busyLock('saveUser')) return;
-  editId=editId||null;
-  var nome=(document.getElementById('uu-nome').value||'').trim();
-  var email=(document.getElementById('uu-email').value||'').trim().toLowerCase();
-  var tel=document.getElementById('uu-tel').value||'';
-  var role=document.getElementById('uu-role').value;
-  var statusEl=document.getElementById('uu-status');
-  var newStatus=statusEl?statusEl.value:'ativo';
-  var ativo=newStatus==='ativo';
-  var err=document.getElementById('uu-err');
-  if(!nome){err.textContent='Nome obrigatório.';err.style.display='block';return;}
-  if(!email||email.indexOf('@')<0){err.textContent='E-mail inválido.';err.style.display='block';return;}
-  var users=getUsers();
-  for(var i=0;i<users.length;i++){
-    if(users[i].email===email&&users[i].id!==(editId||'')){err.textContent='E-mail já cadastrado.';err.style.display='block';return;}
-  }
-  if(!editId){
-    var pwd=document.getElementById('uu-pwd').value||'';
-    var pwd2=document.getElementById('uu-pwd2').value||'';
-    if(pwd.length<6){err.textContent='Senha mínima 6 caracteres.';err.style.display='block';return;}
-    if(pwd!==pwd2){err.textContent='Senhas não conferem.';err.style.display='block';return;}
-    users.push({id:uid(),nome:nome,email:email,telefone:tel,pwd:hashPwd(pwd),role:role,ativo:ativo,status:newStatus,criadoEm:new Date().toISOString()});
-  } else {
-    for(var i=0;i<users.length;i++){
-      if(users[i].id===editId){
-        users[i].nome=nome; users[i].email=email; users[i].telefone=tel;
-        users[i].role=role; users[i].ativo=ativo; users[i].status=newStatus;
-        break;
-      }
-    }
-  }
-  saveUsers(users);
-  // Sincroniza com Supabase se habilitado (async, sem bloquear UI)
-  if(CLOUD_ENABLED) _usuarioUpsertSb(editId ? users.find(function(u){ return u.id===editId; }) : users[users.length-1]).catch(function(e){ console.error('[Fluxy/USU] erro em _usuarioUpsertSb:', e); });
-  logHist(editId?'Editou usuário':'Cadastrou usuário', nome+' ('+roleLabel(role)+') status: '+newStatus);
-  closeModal();
-  safeRender('usuarios',renderUsuarios);
-  toast('✅ Usuário salvo!');
-  busyUnlock('saveUser');
-}
-
-function resetPwd(id){
-  openModal('<div class="modal-title">🔑 Redefinir Senha</div>'
-    +'<div class="field"><label>NOVA SENHA</label><input type="password" id="rp-pwd" placeholder="Mínimo 6 caracteres"></div>'
-    +'<div class="field"><label>CONFIRMAR</label><input type="password" id="rp-pwd2" placeholder="Repita"></div>'
-    +'<div id="rp-err" class="alert err"></div>'
-    +'<div class="modal-foot"><button class="btn btn-g" onclick="closeModal()">Cancelar</button>'
-    +'<button class="btn btn-p" onclick="doResetPwd(\''+id+'\')">💾 Redefinir</button></div>');
-}
-
-function doResetPwd(id){
-  var pwd=document.getElementById('rp-pwd').value||'';
-  var pwd2=document.getElementById('rp-pwd2').value||'';
-  var err=document.getElementById('rp-err');
-  if(pwd.length<6){err.textContent='Mínimo 6 caracteres.';err.style.display='block';return;}
-  if(pwd!==pwd2){err.textContent='Senhas não conferem.';err.style.display='block';return;}
-  var users=getUsers();
-  for(var i=0;i<users.length;i++) if(users[i].id===id){users[i].pwd=hashPwd(pwd);break;}
-  saveUsers(users);
-  closeModal();
-  toast('✅ Senha redefinida!');
-}
-
-function deleteUser(id){
+function openUserModal(editId){ if(!isAdm()&&!isGer()) return; editId=editId||null; var users=getUsers(); var u=null; if(editId){for(var i=0;i<users.length;i++) if(users[i].id===editId){u=users[i];break;}} if(u&&!isAdm()&&(u.role==='adm'||u.role==='ger')){ toast('Sem permissão para editar este usuário.','err'); return; } var curStatus=u?(u.status||( u.ativo===false?'bloqueado':'ativo')):'ativo'; var pwdFields=u?'' :'<div class="alert" style="background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.3);color:#BFDBFE;font-size:12px;padding:10px 12px;border-radius:10px;margin-bottom:10px">🔐 Um link seguro de definição de senha será gerado após o cadastro. Nenhuma senha é definida aqui.</div>'; var html='<div class="modal-title">'+(u?'✏️ Editar':'➕ Novo')+' Usuário</div>' +'<div class="field"><label>NOME *</label><input id="uu-nome" value="'+(u?u.nome||'':'')+'" placeholder="Nome completo"></div>' +'<div class="field"><label>E-MAIL *</label><input id="uu-email" type="email" value="'+(u?u.email||'':'')+'" placeholder="email@empresa.com"></div>' +'<div class="field"><label>TELEFONE</label><input id="uu-tel" value="'+(u?u.telefone||'':'')+'" placeholder="(00) 00000-0000"></div>' +pwdFields +'<div class="field"><label>TIPO</label><select id="uu-role">' +(isAdm()?'<option value="ger"'+(u&&u.role==='ger'?' selected':'')+'>👔 Gerente</option>':'') +'<option value="vend"'+(u&&u.role==='vend'?' selected':'')+'>Vendedor</option>' +'<option value="entr"'+(u&&u.role==='entr'?' selected':'')+'>Entregador</option>' +(isAdm()?'<option value="adm"'+(u&&u.role==='adm'?' selected':'')+'>Administrador</option>':'') +'</select></div>' +'<div class="field"><label>STATUS DE ACESSO</label><select id="uu-status">' +'<option value="ativo"'+(curStatus==='ativo'?' selected':'')+'>✅ Ativo — acesso liberado</option>' +'<option value="bloqueado"'+(curStatus==='bloqueado'?' selected':'')+'>🚫 Bloqueado — não consegue logar</option>' +'<option value="desligado"'+(curStatus==='desligado'?' selected':'')+'>❌ Desligado — acesso removido</option>' +'</select></div>' +'<div id="uu-err" class="alert err"></div>' +'<div class="modal-foot">' +'<button class="btn btn-g" onclick="closeModal()">Cancelar</button>' +'<button class="btn btn-p" data-id="'+(editId||'')+'" onclick="saveUser(this.dataset.id)">💾 '+(u?'Atualizar':'Cadastrar')+'</button>' +'</div>'; openModal(html); } async function saveUser(editId){ if(!requireAdmOrGer()) return; if(!busyLock('saveUser')) return; editId=editId||null; var nome=(document.getElementById('uu-nome').value||'').trim(); var email=(document.getElementById('uu-email').value||'').trim().toLowerCase(); var tel=document.getElementById('uu-tel').value||''; var role=document.getElementById('uu-role').value; var statusEl=document.getElementById('uu-status'); var newStatus=statusEl?statusEl.value:'ativo'; var ativo=newStatus==='ativo'; var err=document.getElementById('uu-err'); if(!nome){err.textContent='Nome obrigatório.';err.style.display='block';busyUnlock('saveUser');return;} if(!email||email.indexOf('@')<0){err.textContent='E-mail inválido.';err.style.display='block';busyUnlock('saveUser');return;} if((role==='adm'||role==='ger'||role==='gerente')&&!isAdm()){err.textContent='Somente administradores podem definir este papel.';err.style.display='block';busyUnlock('saveUser');return;} var users=getUsers(); for(var i=0;i<users.length;i++){ if(users[i].email===email&&users[i].id!==(editId||'')){err.textContent='E-mail já cadastrado.';err.style.display='block';busyUnlock('saveUser');return;} } if(!editId){ if(!(CLOUD_ENABLED && _sb)){ err.textContent='Sem conexão com o servidor. Verifique sua internet e tente novamente.'; err.style.display='block'; busyUnlock('saveUser'); return; } var saveBtn=document.querySelector('.modal-foot .btn-p'); if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='⏳ Processando...'; } try{ var { data: fnData, error: fnError } = await _sb.functions.invoke('criar-usuario', { body:{ acao:'criar', nome:nome, email:email, role:role, telefone: tel||null } }); if(fnError||(fnData&&fnData.error)){ var code=(fnData&&fnData.code)||''; err.textContent=_criarUsuarioErrMsg(code,(fnData&&fnData.error)||'Não foi possível cadastrar o usuário.'); err.style.display='block'; if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='💾 Cadastrar'; } busyUnlock('saveUser'); return; } logHist('Cadastrou usuário', nome+' ('+roleLabel(role)+')'); closeModal(); safeRender('usuarios',renderUsuarios); if(fnData&&fnData.action_link){ _showActionLinkModal(fnData.action_link,nome,email); } else { toast('✅ Usuário cadastrado! Peça para ele usar "Esqueci minha senha" no login.'); } }catch(e){ console.error('[Fluxy/USU] erro ao criar usuário:', e); err.textContent='Erro inesperado ao cadastrar usuário. Tente novamente.'; err.style.display='block'; if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='💾 Cadastrar'; } } busyUnlock('saveUser'); return; } for(var i=0;i<users.length;i++){ if(users[i].id===editId){ users[i].nome=nome; users[i].email=email; users[i].telefone=tel; users[i].role=role; users[i].ativo=ativo; users[i].status=newStatus; break; } } saveUsers(users); if(CLOUD_ENABLED) _usuarioUpsertSb(users.find(function(u){ return u.id===editId; })).catch(function(e){ console.error('[Fluxy/USU] erro em _usuarioUpsertSb:', e); }); logHist('Editou usuário', nome+' ('+roleLabel(role)+') status: '+newStatus); closeModal(); safeRender('usuarios',renderUsuarios); toast('✅ Usuário salvo!'); busyUnlock('saveUser'); } function resetPwd(id){ if(!requireAdmOrGer()) return; var users=getUsers(); var u=null; for(var i=0;i<users.length;i++) if(users[i].id===id){u=users[i];break;} if(u&&!isAdm()&&(u.role==='adm'||u.role==='ger')){ toast('Sem permissão para redefinir a senha deste usuário.','err'); return; } var nome=u?u.nome:''; openModal('<div class="modal-title">🔑 Redefinir Senha</div>' +'<div class="alert" style="background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.3);color:#BFDBFE;font-size:12px;padding:10px 12px;border-radius:10px;margin-bottom:10px">Será gerado um link seguro de redefinição de senha para <b>'+sanitize(nome)+'</b>. Envie esse link diretamente para o usuário. Ele não será salvo nem exibido novamente.</div>' +'<div id="rp-err" class="alert err"></div>' +'<div class="modal-foot"><button class="btn btn-g" onclick="closeModal()">Cancelar</button>' +'<button class="btn btn-p" onclick="doResetPwd(\''+id+'\')">🔗 Gerar link</button></div>'); } async function doResetPwd(id){ if(!requireAdmOrGer()) return; if(!busyLock('doResetPwd')) return; var err=document.getElementById('rp-err'); if(!(CLOUD_ENABLED && _sb)){ if(err){err.textContent='Sem conexão com o servidor.';err.style.display='block';} busyUnlock('doResetPwd'); return; } var btn=document.querySelector('.modal-foot .btn-p'); if(btn){ btn.disabled=true; btn.textContent='⏳ Gerando...'; } try{ var { data: fnData, error: fnError } = await _sb.functions.invoke('criar-usuario', { body:{ acao:'resetar_senha', usuario_id:id } }); if(fnError||(fnData&&fnData.error)){ var code=(fnData&&fnData.code)||''; if(err){ err.textContent=_criarUsuarioErrMsg(code,(fnData&&fnData.error)||'Não foi possível gerar o link.'); err.style.display='block'; } if(btn){ btn.disabled=false; btn.textContent='🔗 Gerar link'; } busyUnlock('doResetPwd'); return; } var users=getUsers(); var u=null; for(var i=0;i<users.length;i++) if(users[i].id===id){u=users[i];break;} closeModal(); if(fnData&&fnData.action_link){ _showActionLinkModal(fnData.action_link,u?u.nome:'',u?u.email:''); } else { toast('Link gerado, mas não retornado. Tente novamente.','err'); } }catch(e){ console.error('[Fluxy/USU] erro ao redefinir senha:', e); if(err){ err.textContent='Erro inesperado. Tente novamente.'; err.style.display='block'; } if(btn){ btn.disabled=false; btn.textContent='🔗 Gerar link'; } } busyUnlock('doResetPwd'); } function _criarUsuarioErrMsg(code, fallback){ var map={ EMAIL_OTHER_EMPRESA:'Este e-mail já está vinculado a outra empresa.', EMAIL_ALREADY_LINKED:'Este e-mail já possui uma conta de acesso vinculada.', FORBIDDEN_ROLE_ESCALATION:'Somente administradores podem criar usuários com este papel.', FORBIDDEN_ROLE:'Apenas administradores e gerentes podem realizar esta ação.', FORBIDDEN_CROSS_TENANT:'Você não tem permissão para esta ação neste usuário.', INVALID_EMAIL:'E-mail inválido.', NO_AUTH_ACCOUNT:'Este usuário ainda não possui conta de acesso vinculada.', USER_NOT_FOUND:'Usuário não encontrado.', MISSING_FIELDS:'Preencha todos os campos obrigatórios.', INVALID_ROLE:'Papel (tipo) inválido.', NO_TOKEN:'Sessão expirada. Faça login novamente.', INVALID_SESSION:'Sessão expirada. Faça login novamente.', CALLER_NOT_FOUND:'Sua conta não foi encontrada. Faça login novamente.', CALLER_INACTIVE:'Sua conta está inativa.' }; return map[code] || fallback || 'Não foi possível concluir a operação.'; } function _showActionLinkModal(link, nome, email){ var html='<div class="modal-title">🔗 Link de acesso gerado</div>' +'<div class="alert" style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);color:#FCD34D;font-size:12px;padding:10px 12px;border-radius:10px;margin-bottom:10px">⚠️ Link de uso único e temporário. Copie e envie agora para <b>'+sanitize(nome||'')+'</b> ('+sanitize(email||'')+'). Não será exibido novamente.</div>' +'<div class="field"><textarea id="al-link" readonly style="width:100%;min-height:80px;font-size:11px;word-break:break-all">'+sanitize(link)+'</textarea></div>' +'<div class="modal-foot"><button class="btn btn-g" onclick="_closeActionLinkModal()">Fechar</button>' +'<button class="btn btn-p" onclick="_copyActionLink()">📋 Copiar link</button></div>'; openModal(html); } function _copyActionLink(){ var ta=document.getElementById('al-link'); if(!ta) return; var txt=ta.value; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){toast('Link copiado!');}).catch(function(){_copyFallback(txt);}); } else { _copyFallback(txt); } } function _closeActionLinkModal(){ var ta=document.getElementById('al-link'); if(ta) ta.value=''; closeModal(); } function deleteUser(id){
   if(!busyLock('deleteUser')) return;
   if(!isAdm()){toast('Sem permissão.');return;}
   // Protect current logged-in user
