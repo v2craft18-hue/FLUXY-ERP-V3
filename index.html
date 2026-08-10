@@ -4498,7 +4498,7 @@ function applyRoleNav(){
   }
 
   // For GERENTE: hide items not relevant to them
-  var hideForGer=['meus-clientes','comissoes','rotas','historico'];
+  var hideForGer=['meus-clientes','rotas','historico'];
   for(var gi=0;gi<hideForGer.length;gi++){
     var gb=document.querySelector('.nav-btn[data-v="'+hideForGer[gi]+'"]');
     // Only hide if ger AND not adm — ADM always sees everything
@@ -5030,7 +5030,7 @@ function go(v){
   if(v==='rotas'&&!isAdm()&&!isGer()&&!isEntr()){ toast('Sem permissão.'); return; }
   if(v==='configuracoes'&&!isAdm()){ toast('Sem permissão.','err'); return; }
   if(v==='gerente' && isEntr()){ toast('Sem permissão.'); return; }
-  if(isGer() && v==='comissoes'){ toast('Sem permissão.'); return; }
+  
   if(v==='entregas'){ v='rotas'; }
   if(v==='cobranças' && isEntr()){ toast('Sem permissão.'); return; }
   if((v==='historico'||v==='pedidos') && isEntr()){ toast('Sem permissão.'); return; }
