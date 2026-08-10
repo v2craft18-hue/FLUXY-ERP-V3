@@ -244,7 +244,7 @@ async function handleResetSenha(sb, body, callerRow, callerUid, empresaId) {
 
   const { data: alvo, error: alvoErr } = await sb
     .from('usuarios')
-    .select('id, email, empresa_id, auth_uid')
+    .select('id, email, empresa_id, auth_uid, role')
     .eq('id', usuarioId)
     .maybeSingle()
 
@@ -255,6 +255,12 @@ async function handleResetSenha(sb, body, callerRow, callerUid, empresaId) {
   if (alvo.empresa_id !== empresaId) {
     return json({ error: 'Voce nao tem permissao para redefinir a senha deste usuario.', code: 'FORBIDDEN_CROSS_TENANT' }, 403)
 }
+
+  // GERENTE nao pode resetar senha de ADMIN nem de outro GERENTE (evita escalada/sequestro de conta privilegiada).
+  // Apenas ADMIN pode resetar senha de contas com papel administrativo/gerencial.
+  if (callerRow.role !== 'adm' && ROLES_RESTRITAS_A_ADMIN.includes(alvo.role)) {
+    return json({ error: 'Somente administradores podem redefinir a senha de administradores ou gerentes.', code: 'FORBIDDEN_ROLE_ESCALATION' }, 403)
+  }
 
   if (!alvo.auth_uid) {
     return json({ error: 'Este usuario ainda nao possui uma conta de acesso vinculada.', code: 'NO_AUTH_ACCOUNT' }, 400)
