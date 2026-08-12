@@ -30,6 +30,10 @@
       "dest": "/assets/$1"
     },
     {
+      "src": "/config\\.js",
+      "dest": "/config.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "/index.html"
     }
