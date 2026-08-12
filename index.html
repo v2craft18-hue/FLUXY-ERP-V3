@@ -2048,7 +2048,7 @@ function _notifyState(key, value){
 // STORAGE
 // ═══════════════════════════════════════════════════════════
 var KEYS = {
-  users:   'fz_users',
+  users:   'fz_users', usuarios: 'fz_users',
   sess:    'fz_sess',
   peds:    'fz_pedidos',
   clis:    'fz_clientes',
@@ -12070,13 +12070,13 @@ async function migrateDataToSb(){
   var modules = [
     { key: 'clis', table: 'clientes', name: 'Clientes', converter: _cliToSb },
     { key: 'prods', table: 'produtos', name: 'Produtos', converter: _prodToSb },
-    { key: 'peds', table: 'pedidos', name: 'Pedidos', converter: _pedidoToSb },
+    { key: 'peds', table: 'pedidos', name: 'Pedidos', converter: _pedidoToSb, onConflict: 'empresa_id,numero' },
     { key: 'cobr', table: 'cobracas', name: 'Cobranças', converter: _cobrToSb },
     { key: 'usuarios', table: 'usuarios', name: 'Usuários', converter: _usuarioToSb }
   ];
   
   for(var i=0; i<modules.length; i++){
-    await _migrateModulo(modules[i].key, modules[i].table, modules[i].name, modules[i].converter);
+    await _migrateModulo(modules[i].key, modules[i].table, modules[i].name, modules[i].converter, modules[i].onConflict);
   }
   
   // Salvar estado de migração
@@ -12086,7 +12086,7 @@ async function migrateDataToSb(){
   logHist('Sistema', 'Migração: '+APP_STATE.migration_report.migrada+' migrados, '+APP_STATE.migration_report.ignorada+' ignorados, '+APP_STATE.migration_report.erro+' erros');
 }
 
-async function _migrateModulo(key, table, name, converter){
+async function _migrateModulo(key, table, name, converter, onConflictCol){
   // Migra um módulo específico
   if(APP_STATE.migration_state[key]) {
     console.log('[Fluxy/MIG] '+name+' já migrado, pulando');
@@ -12128,7 +12128,7 @@ async function _migrateModulo(key, table, name, converter){
       var batch = sbRecords.slice(b, b+BATCH_SIZE);
       var { data, error } = await _sb
         .from(table)
-        .upsert(batch, { onConflict: 'id' });
+        .upsert(batch, { onConflict: onConflictCol || 'id' });
       
       if(error){
         throw new Error(table+': '+error.message);
@@ -12297,7 +12297,7 @@ async function _flushQueue(){
           var {error}=await _sb.from(table).delete().eq('id',op.data.id);
           if(error) throw error;
         }else{
-          var {error}=await _sb.from(table).upsert([op.data],{onConflict:'id'});
+          var {error}=await _sb.from(table).upsert([op.data],{onConflict:(table==='pedidos'?'empresa_id,numero':'id')});
           if(error) throw error;
         }
         
