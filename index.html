@@ -1200,7 +1200,7 @@ select option {
 </style>
 
 <!-- ═══ Supabase SDK ═══ -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0"></script><script src="./config.js"></script><script>if(window.FLUXY_SHOW_ENV_BADGE){document.addEventListener('DOMContentLoaded',function(){var b=document.createElement('div');b.textContent='STAGING / HOMOLOGAÇÃO';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:999999;background:#b91c1c;color:#fff;text-align:center;font-weight:bold;padding:4px;font-size:13px;';document.body.appendChild(b);});}</script>
 
 </head>
 <body>
@@ -2068,19 +2068,19 @@ var KEYS = {
   empresas:'fz_empresas_master'
 };
 
-function stor_get(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } }
-function stor_set(k,v){
+function stor_get(k){ if(window.FLUXY_BLOCKED) return null; var nk=(typeof window.fluxyKey==='function')?window.fluxyKey(k):k; try{ return JSON.parse(localStorage.getItem(nk)||'null'); }catch(e){ return null; } }
+function stor_set(k,v){ if(window.FLUXY_BLOCKED) return; var nk=(typeof window.fluxyKey==='function')?window.fluxyKey(k):k;
   try{
-    localStorage.setItem(k, JSON.stringify(v));
+    localStorage.setItem(nk, JSON.stringify(v));
   } catch(e){
     if(e && (e.name==='QuotaExceededError'||e.name==='NS_ERROR_DOM_QUOTA_REACHED'||e.code===22)){
       console.error('[Fluxy] localStorage FULL — smart purge');
       try{
-        var _protected=['fz_sess','fz_users','fz_empresa'];
+        var _protected=['fz_sess','fz_users','fz_empresa'].map(function(x){return window.fluxyKey(x);});
         var _priority=['fz_cobranças','fz_historico','fz_notificacoes',
           'fz_rotas','fz_estoque_mov','fz_contas_receber',
-          'fz_comm','fz_sugestoes','fz_chamados','fz_faq'];
-        var _all=Object.keys(localStorage).filter(function(x){return x.startsWith('fz_');});
+          'fz_comm','fz_sugestoes','fz_chamados','fz_faq'].map(function(x){return window.fluxyKey(x);});
+        var _all=Object.keys(localStorage).filter(function(x){return x.startsWith(window.fluxyKey('fz_'));});
         var _victim=null;
         for(var _pi=0;_pi<_priority.length;_pi++){
           if(_all.indexOf(_priority[_pi])>=0&&_protected.indexOf(_priority[_pi])<0){
@@ -2095,7 +2095,7 @@ function stor_set(k,v){
         if(_victim){
           console.warn('[Fluxy] Purging',_victim,'to free space');
           localStorage.removeItem(_victim);
-          localStorage.setItem(k,JSON.stringify(v));
+          localStorage.setItem(nk,JSON.stringify(v));
         } else {
           console.error('[Fluxy] stor_set: only protected keys remain, cannot purge');
           if(typeof toast==='function') toast('Armazenamento cheio. Limpe dados antigos.','err');
@@ -3988,10 +3988,10 @@ function _finTestarConexao(){
 
 // getBancario / saveBancario — safe wrappers
 function getBancario(){
-  try{ return JSON.parse(localStorage.getItem('fz_bancario')||'{}'); }catch(e){ return {}; }
+  if(window.FLUXY_BLOCKED) return {}; try{ return JSON.parse(localStorage.getItem(window.fluxyKey('fz_bancario'))||'{}'); }catch(e){ return {}; }
 }
 function saveBancario(obj){
-  try{ localStorage.setItem('fz_bancario', JSON.stringify(obj)); }catch(e){}
+  if(window.FLUXY_BLOCKED) return; try{ localStorage.setItem(window.fluxyKey('fz_bancario'), JSON.stringify(obj)); }catch(e){}
 }
 
 
@@ -13546,11 +13546,11 @@ console.log('[APP VERSION]', APP_VERSION, '| build:', new Date().toISOString().s
 
 // ═══ ATIVAR SUPABASE EM PRODUÇÃO ═══
 // Projeto: kufuggixwyjgxhpsvmpe (anon key é pública por design)
-if(typeof supabase !== 'undefined' && window.location.hostname !== 'localhost') {
-  var SBURL = 'https://kufuggixwyjgxhpsvmpe.supabase.co';
-  var SBKEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1ZnVnZ2l4d3lqZ3hocHN2bXBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3OTExNjYsImV4cCI6MjA5OTM2NzE2Nn0.CI0WIyFQSHQzSCXGsTiP2qDzOyeY_GdC6cCSYCaP4SQ';
+if(window.FLUXY_BLOCKED){ console.error('[Fluxy] Ambiente não reconhecido — Supabase não inicializado.'); } else if(typeof supabase !== 'undefined' && window.FLUXY_ENV !== 'local') {
+  var _cfg = window.FLUXY_SUPABASE_CONFIG; var SBURL = _cfg ? _cfg.url : '';
+  var SBKEY = _cfg ? _cfg.key : '';
   
-  if(SBKEY.indexOf('COLE_AQUI') === 0){
+  if(!_cfg || !SBKEY || SBKEY.indexOf('<<') === 0){
     console.error('[Fluxy] ✗ ANON KEY NÃO CONFIGURADA — abra o index.html, procure por SBKEY e cole a anon key do projeto (Dashboard → Project Settings → API). Sem ela o sistema opera apenas em localStorage.');
   } else {
     try {
@@ -13709,11 +13709,11 @@ document.addEventListener('DOMContentLoaded',function(){
     var banner=document.getElementById('pwa-banner');
     if(banner) banner.style.display='none';
     // Don't show again for 24h
-    try{ localStorage.setItem('fluxi_pwa_dismissed',Date.now().toString()); }catch(e){}
+    try{ localStorage.setItem(window.fluxyKey('fluxi_pwa_dismissed'),Date.now().toString()); }catch(e){}
   };
   // Check if was dismissed recently
   try{
-    var d=parseInt(localStorage.getItem('fluxi_pwa_dismissed')||'0');
+    var d=parseInt(localStorage.getItem(window.fluxyKey('fluxi_pwa_dismissed'))||'0');
     if(Date.now()-d<86400000){
       var banner=document.getElementById('pwa-banner');
       if(banner) banner.style.display='none';
