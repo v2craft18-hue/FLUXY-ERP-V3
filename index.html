@@ -2546,7 +2546,7 @@ function _pedidoFromSb(row){
   // Converte linha Supabase (snake_case) → formato local (camelCase)
   if(!row) return null;
   return {
-    id:           row.numero || '',
+    id:           row.numero || '', _sbId: row.id || '',
     cliId:        row.cliente_id || '',
     cliNome:      row.cliente_nome || '',
     vendId:       row.vendedor_id || '',
@@ -2610,14 +2610,14 @@ async function loadPedidosFromSb(){
     var peds = (data || []).map(function(row){ return _pedidoFromSb(row); });
     
     // Para cada pedido, carregar seus itens
-    for(var p=0; p<peds.length; p++){
+    var _prevPedsCache=stor_get(KEYS.peds)||[]; var _prevItensMap={}; for(var _pi=0;_pi<_prevPedsCache.length;_pi++){ if(_prevPedsCache[_pi]&&_prevPedsCache[_pi].id) _prevItensMap[_prevPedsCache[_pi].id]=_prevPedsCache[_pi].itens; } for(var p=0; p<peds.length; p++){
       var { data: itens, error: itemsErr } = await _sb
         .from('pedido_itens')
         .select('*')
-        .eq('pedido_id', peds[p].id)
+        .eq('pedido_id', peds[p]._sbId)
         .eq('empresa_id', SESS.empresaId);
       
-      if(!itemsErr && itens){
+      if(itemsErr){ console.warn('[Fluxy/PED] Erro ao carregar itens de '+peds[p].id+':', itemsErr.message); if(_prevItensMap[peds[p].id] !== undefined){ peds[p].itens = _prevItensMap[peds[p].id]; } } if(!itemsErr && itens){
         peds[p].itens = itens.map(function(row){ return _pedidoItemFromSb(row); });
       }
     }
