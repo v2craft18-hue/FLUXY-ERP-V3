@@ -2579,12 +2579,12 @@ function _pedidoItemToSb(itemObj, pedidoId){
   };
 }
 
-async function _pedidoItemFromSb(row){
+function _pedidoItemFromSb(row){
   // Converte item Supabase → local
   if(!row) return null;
   return {
     prodId:        row.produto_id || '',
-    prodNome:      row.produto_nome || '',
+    prodNome:      row.produto_nome || '', nome: row.produto_nome || '',
     qty:           row.quantidade || 0,
     preco:         row.preco_unitario || 0,
     descontoItem:  row.desconto_item || 0
