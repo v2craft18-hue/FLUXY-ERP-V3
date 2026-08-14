@@ -1,7 +1,7 @@
 (function(){
   var host = window.location.hostname;
   var PROD_HOSTS = ['fluxy-erp-v3.vercel.app'];
-  var STAGING_HOSTS = []; // preencher explicitamente quando o deploy de staging existir
+      var STAGING_HOSTS = ['fluxy-erp-v3-git-staging-v2craft18-2705s-projects.vercel.app']; // staging preview (branch staging)
 
   var ENV;
   if (host === 'localhost' || host === '127.0.0.1') {
