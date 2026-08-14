@@ -6573,7 +6573,7 @@ function nvStep3(){
 }
 
 function nvFinalizar(){
-  if(!SESS||!SESS.userId){ toast('Sessão expirada. Faça login novamente.','err'); return; }
+  if(!SESS||!SESS.userId){ toast('Sessão expirada. Faça login novamente.','err'); return; } if(!navigator.onLine){ toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err'); return; }
   if(!busyLock('nvFinalizar')) return;
   if(!NV.cliId||!NV.cart.length) return;
   // Flush any unfired price inputs (Android focus bug)
@@ -9977,7 +9977,7 @@ function nvEnviarGerente(){
   openModal(html);
 }
 
-function nvConfirmarGerente(total,commVal,disc){
+function nvConfirmarGerente(total,commVal,disc){ if(!navigator.onLine){ toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err'); return; }
   var gerSelEl=document.getElementById('ger-sel-id');
   var gerObsEl=document.getElementById('ger-obs');
   if(!gerSelEl) return;
