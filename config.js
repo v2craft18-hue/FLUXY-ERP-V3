@@ -20,7 +20,7 @@
   var SUPABASE_CONFIGS = {
     local: null,
     production: { url: 'https://kufuggixwyjgxhpsvmpe.supabase.co', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1ZnVnZ2l4d3lqZ3hocHN2bXBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3OTExNjYsImV4cCI6MjA5OTM2NzE2Nn0.CI0WIyFQSHQzSCXGsTiP2qDzOyeY_GdC6cCSYCaP4SQ' },
-    staging: { url: 'https://fwxqucqmqutykesijoxt.supabase.co', key: '<<STAGING_ANON_KEY>>' },
+    staging: { url: 'https://fwxqucqmqutykesijoxt.supabase.co', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3eHF1Y3FtcXV0eWtlc2lqb3h0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzOTEzNDQsImV4cCI6MjEwMTk2NzM0NH0.3tjVjBxXejSVbC2oFxia3WaX5UD_818Lb3h4Hjb4698' },
     unknown: null
       };
 
