@@ -13559,6 +13559,63 @@ if(window.FLUXY_BLOCKED){ console.error('[Fluxy] Ambiente não reconhecido — S
       });
       console.log('[Fluxy] ✓ Supabase init - projeto:', SBURL.substring(8,30) + '...');
       enableCloudSync('supabase', { url: SBURL, key: SBKEY });
+
+// --- INÍCIO: fluxo de primeiro acesso (definição de senha via link de recovery) ---
+function _fluxyGetRecoveryTokensFromHash(){
+  var h = window.location.hash || '';
+  if(!h || h.indexOf('type=recovery') === -1) return null;
+  var params = new URLSearchParams(h.replace(/^#/, ''));
+  var at = params.get('access_token'), rt = params.get('refresh_token');
+  if(!at || !rt) return null;
+  return { access_token: at, refresh_token: rt };
+}
+async function _fluxyCheckPasswordRecovery(){
+  if(!_sb) return;
+  var tokens = _fluxyGetRecoveryTokensFromHash();
+  if(!tokens) return;
+  try{
+    var { error } = await _sb.auth.setSession({ access_token: tokens.access_token, refresh_token: tokens.refresh_token });
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    if(error){ console.error('[Fluxy/RECOVERY] erro ao estabelecer sessão:', error.message); return; }
+    _showFirstAccessModal();
+  }catch(e){ console.error('[Fluxy/RECOVERY] exceção:', e); }
+}
+function _showFirstAccessModal(){
+  if(document.getElementById('fa-overlay')) return;
+  var html = '<div class="modal-title">🔐 Definir sua senha</div>'
+    + '<div class="field"><label>Nova senha</label><input type="password" id="fa-pwd1" placeholder="Mínimo 8 caracteres"></div>'
+    + '<div class="field"><label>Confirmar nova senha</label><input type="password" id="fa-pwd2" placeholder="Repita a senha"></div>'
+    + '<div id="fa-err" style="display:none;color:#FCA5A5;font-size:12px;margin-top:6px;"></div>'
+    + '<div class="modal-foot"><button class="btn btn-p" id="fa-btn" onclick="_confirmFirstAccess()">Definir senha</button></div>';
+  var ov = document.createElement('div');
+  ov.id = 'fa-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center;';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#111;border-radius:14px;padding:20px;max-width:360px;width:90%;';
+  box.innerHTML = html;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+}
+async function _confirmFirstAccess(){
+  var p1=(document.getElementById('fa-pwd1').value||''), p2=(document.getElementById('fa-pwd2').value||'');
+  var err=document.getElementById('fa-err'); err.style.display='none';
+  if(!p1 || !p2){ err.textContent='Preencha os dois campos.'; err.style.display='block'; return; }
+  if(p1.length < 8){ err.textContent='A senha deve ter no mínimo 8 caracteres.'; err.style.display='block'; return; }
+  if(p1 !== p2){ err.textContent='As senhas não coincidem.'; err.style.display='block'; return; }
+  var btn=document.getElementById('fa-btn'); if(btn) btn.disabled=true;
+  try{
+    var { error } = await _sb.auth.updateUser({ password: p1 });
+    if(error){ err.textContent = error.message || 'Erro ao definir senha.'; err.style.display='block'; if(btn) btn.disabled=false; return; }
+    var ov=document.getElementById('fa-overlay'); if(ov) ov.remove();
+    toast('✅ Senha definida com sucesso! Faça login normalmente.','ok');
+  }catch(e){ err.textContent='Erro inesperado ao definir senha.'; err.style.display='block'; if(btn) btn.disabled=false; }
+}
+if(_sb){
+  _sb.auth.onAuthStateChange(function(event){ if(event === 'PASSWORD_RECOVERY'){ _showFirstAccessModal(); } });
+}
+window.addEventListener('hashchange', _fluxyCheckPasswordRecovery);
+_fluxyCheckPasswordRecovery();
+// --- FIM: fluxo de primeiro acesso ---
       console.log('[Fluxy] 🚀 Supabase ativado');
     } catch(e) {
       console.error('[Fluxy] ✗ Supabase init failed:', e.message);
