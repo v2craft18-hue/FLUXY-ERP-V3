@@ -269,6 +269,9 @@ async function handleResetSenha(sb, body, callerRow, callerUid, empresaId) {
   const { data: linkData, error: linkErr } = await sb.auth.admin.generateLink({
     type: 'recovery',
     email: alvo.email,
+    options: {
+        redirectTo: 'https://fluxy-erp-v3-git-staging-v2craft18-2705s-projects.vercel.app/'
+    },
 })
   if (linkErr || !linkData) {
     console.error('[criar-usuario] Erro ao gerar link de redefinicao:', linkErr ? linkErr.message : 'sem detalhe')
