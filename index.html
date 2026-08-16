@@ -13561,6 +13561,15 @@ if(window.FLUXY_BLOCKED){ console.error('[Fluxy] Ambiente não reconhecido — S
       enableCloudSync('supabase', { url: SBURL, key: SBKEY });
 
 // --- INÍCIO: fluxo de primeiro acesso (definição de senha via link de recovery) ---
+var _sbRecovery = null;
+function _fluxyGetRecoveryClient(){
+  if(_sbRecovery) return _sbRecovery;
+  if(typeof supabase === 'undefined' || !SBURL || !SBKEY) return null;
+  _sbRecovery = supabase.createClient(SBURL, SBKEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  });
+  return _sbRecovery;
+}
 function _fluxyGetRecoveryTokensFromHash(){
   var h = window.location.hash || '';
   if(!h || h.indexOf('type=recovery') === -1) return null;
@@ -13570,11 +13579,12 @@ function _fluxyGetRecoveryTokensFromHash(){
   return { access_token: at, refresh_token: rt };
 }
 async function _fluxyCheckPasswordRecovery(){
-  if(!_sb) return;
   var tokens = _fluxyGetRecoveryTokensFromHash();
   if(!tokens) return;
+  var client = _fluxyGetRecoveryClient();
+  if(!client) return;
   try{
-    var { error } = await _sb.auth.setSession({ access_token: tokens.access_token, refresh_token: tokens.refresh_token });
+    var { error } = await client.auth.setSession({ access_token: tokens.access_token, refresh_token: tokens.refresh_token });
     history.replaceState(null, '', window.location.pathname + window.location.search);
     if(error){ console.error('[Fluxy/RECOVERY] erro ao estabelecer sessão:', error.message); return; }
     _showFirstAccessModal();
@@ -13604,9 +13614,13 @@ async function _confirmFirstAccess(){
   if(p1.length < 8){ err.textContent='A senha deve ter no mínimo 8 caracteres.'; err.style.display='block'; return; }
   if(p1 !== p2){ err.textContent='As senhas não coincidem.'; err.style.display='block'; return; }
   var btn=document.getElementById('fa-btn'); if(btn) btn.disabled=true;
+  var client = _fluxyGetRecoveryClient();
+  if(!client){ err.textContent='Sessão de recuperação indisponível.'; err.style.display='block'; if(btn) btn.disabled=false; return; }
   try{
-    var { error } = await _sb.auth.updateUser({ password: p1 });
+    var { error } = await client.auth.updateUser({ password: p1 });
     if(error){ err.textContent = error.message || 'Erro ao definir senha.'; err.style.display='block'; if(btn) btn.disabled=false; return; }
+    try{ await client.auth.signOut({ scope: 'local' }); }catch(_){}
+    _sbRecovery = null;
     var ov=document.getElementById('fa-overlay'); if(ov) ov.remove();
     toast('✅ Senha definida com sucesso! Faça login normalmente.','ok');
   }catch(e){ err.textContent='Erro inesperado ao definir senha.'; err.style.display='block'; if(btn) btn.disabled=false; }
