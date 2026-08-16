@@ -211,6 +211,9 @@ const CORS_HEADERS = {
   const { data: linkData, error: linkErr } = await sb.auth.admin.generateLink({
     type: 'recovery',
     email: emailLower,
+    options: {
+        redirectTo: 'https://fluxy-erp-v3-git-staging-v2craft18-2705s-projects.vercel.app/'
+    },
 })
   if (linkErr) {
     console.error('[criar-usuario] Erro ao gerar link de senha:', linkErr.message)
