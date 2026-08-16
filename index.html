@@ -3513,6 +3513,90 @@ function loadSession(){
   if(s && s.userId && s.role){ if(!isValidUUID(s.empresaId)) s.empresaId=s.empresaId||null; if(!s.plano) s.plano='basico'; SESS = s; APP_STATE.session=s; APP_STATE.set('auth.logged',true); APP_STATE.set('auth.role',s.role); APP_STATE.set('auth.user',s.nome); }
 }
 
+var _fluxySessionSyncTimer = null;
+var _fluxySessionSyncInFlight = false;
+var _fluxySessionSyncQueued = false;
+function _fluxyScheduleSessionSync(){
+  if(_fluxySessionSyncTimer){ clearTimeout(_fluxySessionSyncTimer); }
+  _fluxySessionSyncTimer = setTimeout(function(){
+    _fluxySessionSyncTimer = null;
+    _fluxyRunSessionSync();
+  }, 150);
+}
+function _fluxyRunSessionSync(){
+  if(_fluxySessionSyncInFlight){ _fluxySessionSyncQueued = true; return; }
+  _fluxySessionSyncInFlight = true;
+  syncFluxySessionFromSupabase().catch(function(e){ console.error('[Fluxy/SessionSync] Erro:', e && e.message); }).then(function(){
+    _fluxySessionSyncInFlight = false;
+    if(_fluxySessionSyncQueued){ _fluxySessionSyncQueued = false; _fluxyRunSessionSync(); }
+  });
+}
+async function syncFluxySessionFromSupabase(){
+  if(!CLOUD_ENABLED || !_sb || !_sb.auth) return;
+  var realSession = null;
+  try{
+    var r = await _sb.auth.getSession();
+    realSession = (r && r.data && r.data.session) || null;
+  }catch(e){
+    console.warn('[Fluxy/SessionSync] Falha ao obter sessao Supabase:', e && e.message);
+    return;
+  }
+  function _fluxyClearLocalSession(){
+    SESS = null;
+    APP_STATE.session = null;
+    APP_STATE.set('auth.logged', false);
+    APP_STATE.set('auth.role', null);
+    stor_set(KEYS.sess, null);
+    var appEl = document.getElementById('app'); if(appEl) appEl.className = '';
+    var lw = document.getElementById('login-wrap'); if(lw) lw.style.display = 'flex';
+  }
+  if(!realSession || !realSession.user){
+    if(SESS){
+      console.warn('[Fluxy/SessionSync] Supabase sem sessao ativa; limpando sessao local do Fluxy.');
+      _fluxyClearLocalSession();
+    }
+    return;
+  }
+  var uid = realSession.user.id;
+  var realEmail = (realSession.user.email || '').toLowerCase();
+  // Sempre revalida o perfil real no banco (sem atalho por uid/email): role, empresa_id,
+  // ativo e status podem mudar sem que o auth_uid ou o e-mail mudem.
+  var prof = null;
+  try{
+    var res = await _sb.from('usuarios').select('id,nome,role,empresa_id,ativo,status').eq('auth_uid', uid).maybeSingle();
+    prof = res && res.data;
+  }catch(e){
+    console.warn('[Fluxy/SessionSync] Falha ao consultar perfil real:', e && e.message);
+    return;
+  }
+  if(!prof){
+    console.warn('[Fluxy/SessionSync] Sessao Supabase valida sem perfil correspondente em usuarios; limpando sessao local.');
+    _fluxyClearLocalSession();
+    return;
+  }
+  if(prof.status==='desligado' || prof.status==='bloqueado' || prof.ativo===false){
+    console.warn('[Fluxy/SessionSync] Perfil bloqueado/desligado/inativo; encerrando sessao local do Fluxy.');
+    _fluxyClearLocalSession();
+    return;
+  }
+  var divergent = !SESS
+    || SESS.userId !== prof.id
+    || (SESS.email||'').toLowerCase() !== realEmail
+    || (SESS.nome||'') !== (prof.nome||realEmail)
+    || SESS.role !== (prof.role||'vend')
+    || (SESS.empresaId||null) !== (prof.empresa_id||null);
+  if(divergent){
+    console.warn('[Fluxy/SessionSync] Divergencia entre sessao Fluxy e Supabase Auth/perfil detectada; reconciliando para', realEmail);
+    SESS = { userId: prof.id, nome: prof.nome||realEmail, email: realEmail, role: prof.role||'vend', empresaId: prof.empresa_id||null, plano: (SESS&&SESS.plano)||'basico' };
+    APP_STATE.session = SESS;
+    APP_STATE.set('auth.logged', true);
+    APP_STATE.set('auth.role', SESS.role);
+    APP_STATE.set('auth.user', SESS.nome);
+    stor_set(KEYS.sess, SESS);
+    if(typeof showApp==='function'){ showApp(); }
+  }
+}
+
 function isAdm(){
   if(!SESS) return false;
   // Handle role stored as 'adm', 'admin', 'ADM', or tipo:'adm'
@@ -13627,7 +13711,7 @@ async function _confirmFirstAccess(){
 }
 window._confirmFirstAccess = _confirmFirstAccess;
 if(_sb){
-  _sb.auth.onAuthStateChange(function(event){ if(event === 'PASSWORD_RECOVERY'){ _showFirstAccessModal(); } });
+  _sb.auth.onAuthStateChange(function(event){ if(event === 'PASSWORD_RECOVERY'){ _showFirstAccessModal(); } else if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED'){ _fluxyScheduleSessionSync(); } });
 }
 window.addEventListener('hashchange', _fluxyCheckPasswordRecovery);
 _fluxyCheckPasswordRecovery();
@@ -13642,6 +13726,7 @@ _fluxyCheckPasswordRecovery();
 seedAdmin();
 seed();
 loadSession();
+_fluxyScheduleSessionSync();
 async function _verifyCloudSessionOnBoot(){
    if(!CLOUD_ENABLED || !_sb || !SESS) return;
    if(!navigator.onLine) return;
