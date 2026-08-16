@@ -13580,6 +13580,7 @@ async function _fluxyCheckPasswordRecovery(){
     _showFirstAccessModal();
   }catch(e){ console.error('[Fluxy/RECOVERY] exceção:', e); }
 }
+window._fluxyCheckPasswordRecovery = _fluxyCheckPasswordRecovery;
 function _showFirstAccessModal(){
   if(document.getElementById('fa-overlay')) return;
   var html = '<div class="modal-title">🔐 Definir sua senha</div>'
@@ -13610,6 +13611,7 @@ async function _confirmFirstAccess(){
     toast('✅ Senha definida com sucesso! Faça login normalmente.','ok');
   }catch(e){ err.textContent='Erro inesperado ao definir senha.'; err.style.display='block'; if(btn) btn.disabled=false; }
 }
+window._confirmFirstAccess = _confirmFirstAccess;
 if(_sb){
   _sb.auth.onAuthStateChange(function(event){ if(event === 'PASSWORD_RECOVERY'){ _showFirstAccessModal(); } });
 }
