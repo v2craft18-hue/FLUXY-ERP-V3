@@ -2396,7 +2396,7 @@ async function _usuarioUpsertSb(usuarioObj){
          var achou = await _sb
            .from('usuarios')
            .select('id')
-           .eq('legacy_id', usuarioObj.id)
+           .or('id.eq.'+usuarioObj.id+',legacy_id.eq.'+usuarioObj.id)
            .eq('empresa_id', SESS.empresaId)
            .maybeSingle();
          existing = achou.data;
@@ -2434,7 +2434,7 @@ async function _usuarioDeleteSb(id){
     var { error } = await _sb
       .from('usuarios')
       .update({ deleted: true, deleted_at: new Date().toISOString(), ativo: false, status: 'desligado' })
-      .eq('legacy_id', id)
+      .or('id.eq.'+id+',legacy_id.eq.'+id)
       .eq('empresa_id', SESS.empresaId);
     
     if(error) {
@@ -7492,18 +7492,22 @@ function applyCancel(id){
     if(!motivo){err.textContent='Descreva o motivo.';err.style.display='block';return;}
   }
   var peds=getPeds();
+  var _pedRefCancel=null;
   for(var i=0;i<peds.length;i++){
-    if(peds[i].id===id){
+   if(peds[i].id===id){
       if(!isAdm()){err.textContent='Sem permissão.';err.style.display='block';return;}
       peds[i].status='cancelado';
       peds[i].commVal=0;           // zero commission on cancel
       peds[i].cancelMotivo=motivo;
       peds[i].canceladoPor=SESS.nome;
       peds[i].canceladoEm=new Date().toISOString();
+            _pedRefCancel=peds[i];
       break;
     }
   }
   savePeds(peds);
+       // Sincroniza cancelamento no Supabase (persistencia)
+       if(CLOUD_ENABLED && _pedRefCancel) _pedidoUpsertSb(_pedRefCancel).catch(function(e){ console.error('[Fluxy/PED] erro ao sincronizar cancelamento:', e); });
   logHist('Pedido cancelado', id+' — '+motivo+' (por '+SESS.nome+')');
   closeModal();
   safeRender('pedidos',renderPed);
@@ -10483,6 +10487,7 @@ function gerCancelConfirm(pedId){
   }
   var mot=(document.getElementById('ger-cancel-mot')||{value:''}).value||'Cancelado pelo gerente';
   var peds=getPeds();
+     var _pedRefGerCancel=null;
   for(var i=0;i<peds.length;i++){
     if(peds[i].id===pedId){
       peds[i].status='cancelado_ger';
@@ -10491,10 +10496,13 @@ function gerCancelConfirm(pedId){
       peds[i].canceladoPor=SESS.nome;
       peds[i].canceladoEm=new Date().toISOString();
       peds[i].commVal=0;
+             _pedRefGerCancel=peds[i];
       break;
     }
   }
   savePeds(peds);
+       // Sincroniza cancelamento no Supabase (persistencia)
+       if(CLOUD_ENABLED && _pedRefGerCancel) _pedidoUpsertSb(_pedRefGerCancel).catch(function(e){ console.error('[Fluxy/PED] erro ao sincronizar cancelamento (gerente):', e); });
   logHist('Gerente cancelou pedido',pedId+' · '+mot);
   closeModal();
   safeRender('gerente',renderGerente);
