@@ -6650,74 +6650,13 @@ function nvStep3(){
 
   html+='<div class="nv-action-bar" style="flex-wrap:wrap;gap:6px">';
   html+='<button class="btn btn-g" onclick="NV.step=2;renderNV()" style="flex-basis:100%">← Voltar</button>';
-  html+='<button class="btn btn-p" onclick="nvFinalizar()" style="flex:1">✅ Confirmar Pedido</button>';
+  html+='<button id="nv-btn-confirmar" class="btn btn-p" onclick="nvFinalizar()" style="flex:1">✅ Confirmar Pedido</button>';
   html+='<button class="btn btn-y" onclick="nvEnviarGerente()" style="flex:1">👔 Enviar ao Gerente</button>';
   html+='</div>';
   return html;
 }
 
-function nvFinalizar(){
-  if(!SESS||!SESS.userId){ toast('Sessão expirada. Faça login novamente.','err'); return; } if(!navigator.onLine){ toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err'); return; }
-  if(!busyLock('nvFinalizar')) return;
-  if(!NV.cliId||!NV.cart.length) return;
-  // Flush any unfired price inputs (Android focus bug)
-  var inputs=document.querySelectorAll('[data-pid]');
-  for(var fi=0;fi<inputs.length;fi++){
-    var fel=inputs[fi]; var fpId=fel.getAttribute('data-pid');
-    var fval=parseFloat(fel.value)||0;
-    if(fpId&&fval>0) nvEditPreco(fpId,fval);
-  }
-  var pags=document.getElementById('nv-pag');
-  if(pags) NV.pag=pags.value;
-  var discEl=document.getElementById('nv-disc');
-  var rawDisc=discEl?parseFloat(discEl.value)||0:NV.disc||0;
-  var obsEl=document.getElementById('nv-obs');
-  if(obsEl) NV.obs=obsEl.value||'';
-  var nfEl=document.getElementById('nv-solicitar-nf');
-  if(nfEl) NV.solicitarNF=nfEl.checked;
-  var saleSub=0;
-  for(var i=0;i<NV.cart.length;i++) saleSub+=NV.cart[i].preco*NV.cart[i].qty;
-  var maxDisc=Math.floor(saleSub*0.8*100)/100;
-  var disc=Math.min(rawDisc,maxDisc);
-  NV.disc=disc;
-  var total=Math.max(0,saleSub-disc);
-  // Commission: recalc from items with correct caixa logic, discount does NOT reduce comm
-  var commVal=calcCommForCart(NV.cart,0);
-  var origSub=0;
-  for(var i=0;i<NV.cart.length;i++){
-    var it=NV.cart[i];
-    origSub+=(it.precoOrig!=null?it.precoOrig:it.preco)*it.qty;
-  }
-  var peds=getPeds();
-  // Numeração robusta: maior PED-#### existente + 1 (ignora buracos de soft-delete)
-  var _maxN=0;
-  for(var _pi=0;_pi<peds.length;_pi++){
-    var _m=/^PED-(\d+)$/.exec(peds[_pi].id||'');
-    if(_m){ var _n=parseInt(_m[1],10); if(_n>_maxN) _maxN=_n; }
-  }
-  var id='PED-'+(_maxN+1).toString().padStart(4,'0');
-  var ped={
-    id:id, cliId:NV.cliId, cliNome:NV.cliNome,
-    itens:NV.cart, sub:saleSub, origSub:origSub, disc:disc, total:total,
-    obs:NV.obs||'', pag:NV.pag,
-    status:'aprovado',
-    vendId:SESS.userId, criadoEm:new Date().toISOString(), createdAt:Date.now(),
-    commVal:commVal,
-    solicitarNF:NV.solicitarNF||false,
-    nfStatus:NV.solicitarNF?'aguardando':null
-  };
-  peds.push(ped);
-  savePeds(peds);
-  // Sincroniza com Supabase se habilitado (async, sem bloquear UI)
-  if(CLOUD_ENABLED) _pedidoUpsertSb(ped).catch(function(e){ console.error('[Fluxy/PED] erro em _pedidoUpsertSb:', e); });
-  // Baixa automática de estoque ao criar pedido aprovado
-  try{ estBaixaPedido(ped); }catch(e){ console.warn('[Fluxy] estBaixa:',e); }
-  logHist('Pedido confirmado',id+' · '+NV.cliNome+' · '+fmt(total)+' · comissão: '+fmt(commVal)+(NV.obs?' · '+NV.obs:''));
-  toast('✅ Pedido '+id+' aprovado! Comissão: '+fmt(commVal));
-  NV={step:1,cliId:null,cliNome:'',cart:[],disc:0,pag:'Dinheiro',obs:'',commType:'pct',commPct:0,commMeta:0,solicitarNF:false};
-  go('pedidos');
-  busyUnlock('nvFinalizar');
-}
+var _nvPendingReq={direto:null,gerente:null};function _criarPedidoRpc(modo,gerenteDestinoId,desconto,observacoes){var itens=[];for(var _ii=0;_ii<NV.cart.length;_ii++){var _it=NV.cart[_ii];itens.push({produto_id:_it.pId,quantidade:_it.qty,preco_unitario:_it.preco});}var reqKey=(modo==='gerente')?'gerente':'direto';if(!_nvPendingReq[reqKey])_nvPendingReq[reqKey]=crypto.randomUUID();return _sb.rpc('criar_pedido',{p_request_id:_nvPendingReq[reqKey],p_modo:modo,p_cliente_id:NV.cliId,p_itens:itens,p_desconto:desconto||0,p_observacoes:observacoes||'',p_pagamento:NV.pag||'Dinheiro',p_solicitar_nf:NV.solicitarNF||false,p_gerente_destino_id:gerenteDestinoId||null}).then(function(res){if(!res.error)_nvPendingReq[reqKey]=null;return res;});}function nvFinalizar(){if(!SESS||!SESS.userId){toast('Sessão expirada. Faça login novamente.','err');return;}if(!navigator.onLine){toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err');return;}if(!busyLock('nvFinalizar'))return;if(!NV.cliId||!NV.cart.length)return;var inputs=document.querySelectorAll('[data-pid]');for(var fi=0;fi<inputs.length;fi++){var fel=inputs[fi];var fpId=fel.getAttribute('data-pid');var fval=parseFloat(fel.value)||0;if(fpId&&fval>0)nvEditPreco(fpId,fval);}var pags=document.getElementById('nv-pag');if(pags)NV.pag=pags.value;var discEl=document.getElementById('nv-disc');var rawDisc=discEl?parseFloat(discEl.value)||0:NV.disc||0;var obsEl=document.getElementById('nv-obs');if(obsEl)NV.obs=obsEl.value||'';var nfEl=document.getElementById('nv-solicitar-nf');if(nfEl)NV.solicitarNF=nfEl.checked;var saleSub=0;for(var i=0;i<NV.cart.length;i++)saleSub+=NV.cart[i].preco*NV.cart[i].qty;var maxDisc=Math.floor(saleSub*0.8*100)/100;var disc=Math.min(rawDisc,maxDisc);NV.disc=disc;var total=Math.max(0,saleSub-disc);var commVal=calcCommForCart(NV.cart,0);var btnFinalizar=document.getElementById('nv-btn-confirmar');if(btnFinalizar)btnFinalizar.disabled=true;_criarPedidoRpc('direto',null,disc,NV.obs||'').then(function(res){if(res.error){if(btnFinalizar)btnFinalizar.disabled=false;busyUnlock('nvFinalizar');toast('Erro ao confirmar pedido: '+(res.error.message||'erro desconhecido'),'err');return;}var novoId=res.data&&res.data.numero;var novoTotal=(res.data&&res.data.total!=null)?res.data.total:total;loadPedidosFromSb().then(function(){try{var _novoPed=null;var _all=getPeds(true);for(var _pj=0;_pj<_all.length;_pj++){if(_all[_pj].id===novoId){_novoPed=_all[_pj];break;}}if(_novoPed)estBaixaPedido(_novoPed);}catch(e){console.warn('[Fluxy] estBaixa:',e);}logHist('Pedido confirmado',novoId+' · '+NV.cliNome+' · '+fmt(novoTotal)+' · comissão: '+fmt(commVal)+(NV.obs?' · '+NV.obs:''));toast('✅ Pedido '+novoId+' aprovado! Comissão: '+fmt(commVal));NV={step:1,cliId:null,cliNome:'',cart:[],disc:0,pag:'Dinheiro',obs:'',commType:'pct',commPct:0,commMeta:0,solicitarNF:false};if(btnFinalizar)btnFinalizar.disabled=false;go('pedidos');busyUnlock('nvFinalizar');});}).catch(function(e){if(btnFinalizar)btnFinalizar.disabled=false;busyUnlock('nvFinalizar');toast('Erro ao confirmar pedido: '+(e&&e.message?e.message:'falha de rede'),'err');});}
 
 // ════════��══════════════════════════════════════════════════
 // PEDIDOS
@@ -10065,43 +10004,7 @@ function nvEnviarGerente(){
   openModal(html);
 }
 
-function nvConfirmarGerente(total,commVal,disc){ if(!navigator.onLine){ toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err'); return; }
-  var gerSelEl=document.getElementById('ger-sel-id');
-  var gerObsEl=document.getElementById('ger-obs');
-  if(!gerSelEl) return;
-  var gerId=gerSelEl.value;
-  var gerObs=gerObsEl?gerObsEl.value||'':'';
-  var users=getUsers();
-  var gerNome='';
-  
-  var origSub=0;
-  for(var i=0;i<NV.cart.length;i++){
-    var it=NV.cart[i];
-    origSub+=(it.precoOrig!=null?it.precoOrig:it.preco)*it.qty;
-  }
-  var peds=getPeds();
-  var id='GER-'+(peds.filter(function(p){return p.paraGerente;}).length+1).toString().padStart(4,'0');
-  var ped={
-    id:id, cliId:NV.cliId, cliNome:NV.cliNome,
-    itens:NV.cart, sub:origSub, origSub:origSub, disc:disc, total:total,
-    obs:gerObs||NV.obs||'', pag:NV.pag,
-    status:'pendente_ger',
-    paraGerente:true,
-    gerenteId:gerId,
-    vendId:SESS.userId, criadoEm:new Date().toISOString(), createdAt:Date.now(),
-    commVal:commVal,
-    solicitarNF:NV.solicitarNF||false,
-    nfStatus:NV.solicitarNF?'aguardando':null
-  };
-  peds.push(ped);
-  savePeds(peds);
-  for(var i=0;i<users.length;i++) if(users[i].id===gerId){gerNome=users[i].nome;break;}
-  logHist('Pedido enviado ao gerente',id+' · '+NV.cliNome+' · '+fmt(total)+' → '+gerNome);
-  toast('👔 Pedido '+id+' enviado ao gerente '+gerNome+'!');
-  NV={step:1,cliId:null,cliNome:'',cart:[],disc:0,pag:'Dinheiro',obs:'',commType:'pct',commPct:0,commMeta:0,solicitarNF:false};
-  closeModal();
-  go('dashboard');
-}
+function nvConfirmarGerente(total,commVal,disc){if(!navigator.onLine){toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err');return;}if(!busyLock('nvConfirmarGerente'))return;var gerSelEl=document.getElementById('ger-sel-id');var gerObsEl=document.getElementById('ger-obs');if(!gerSelEl){busyUnlock('nvConfirmarGerente');return;}var gerId=gerSelEl.value;var gerObs=gerObsEl?gerObsEl.value||'':'';var users=getUsers();var gerNome='';for(var i=0;i<users.length;i++)if(users[i].id===gerId){gerNome=users[i].nome;break;}var btnEnviar=document.getElementById('nv-btn-confirmar-envio');if(btnEnviar)btnEnviar.disabled=true;_criarPedidoRpc('gerente',gerId,disc,gerObs||NV.obs||'').then(function(res){if(res.error){if(btnEnviar)btnEnviar.disabled=false;busyUnlock('nvConfirmarGerente');toast('Erro ao enviar pedido ao gerente: '+(res.error.message||'erro desconhecido'),'err');return;}var novoId=res.data&&res.data.numero;loadPedidosFromSb().then(function(){logHist('Pedido enviado ao gerente',novoId+' · '+NV.cliNome+' · '+fmt(total)+' → '+gerNome);toast('👔 Pedido '+novoId+' enviado ao gerente '+gerNome+'!');NV={step:1,cliId:null,cliNome:'',cart:[],disc:0,pag:'Dinheiro',obs:'',commType:'pct',commPct:0,commMeta:0,solicitarNF:false};if(btnEnviar)btnEnviar.disabled=false;busyUnlock('nvConfirmarGerente');closeModal();go('dashboard');});}).catch(function(e){if(btnEnviar)btnEnviar.disabled=false;busyUnlock('nvConfirmarGerente');toast('Erro ao enviar pedido ao gerente: '+(e&&e.message?e.message:'falha de rede'),'err');});}
 
 function renderDashGerente(){
   var gerPeds=getGerPeds();
