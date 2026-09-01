@@ -2561,7 +2561,27 @@ function _pedidoFromSb(row){
     nfStatus:     row.nf_status || null,
     commVal:      row.comissao || 0,
     solicitarNF:  row.solicitar_nf || false,
-    criadoEm:     row.criado_em
+    criadoEm:     row.criado_em,
+    // CORREÇÃO FRONTEND 02: versão real do banco (optimistic concurrency) e
+    // campos de auditoria oficiais, mapeados 1:1 das colunas reais de
+    // public.pedidos — nunca mais fabricados localmente.
+    versao:            row.versao,
+    aprovadoEm:         row.aprovado_em || null,
+    gerenteAprovId:     row.gerente_aprov_id || null,
+    gerenteAprovNome:   row.gerente_aprov_nome || null,
+    gerenteObs:         row.gerente_obs || null,
+    recusadoPor:        row.recusado_por || null,
+    recusadoEm:         row.recusado_em || null,
+    gerenteRecusNome:   row.gerente_recus_nome || null,
+    canceladoPor:       row.cancelado_por || null,
+    canceladoEm:        row.cancelado_em || null,
+    cancelMotivo:       row.cancel_motivo || null,
+    deleted:            row.deleted || false,
+    deletedAt:          row.deleted_at || null,
+    deletedBy:          row.deleted_by || null,
+    deletedMotivo:      row.deleted_motivo || null,
+    editadoEm:          row.editado_em || null,
+    editadoPor:         row.editado_por || null
   };
 }
 
@@ -4725,6 +4745,55 @@ function busyLock(key){
   return true;
 }
 function busyUnlock(key){ delete _busyOps[key]; }
+
+// ── CORREÇÃO FRONTEND 02: helper transacional comum para ações de ciclo de
+// vida de pedidos (editar/aprovar/recusar/cancelar/excluir). Garante:
+// request_id idempotente por ação+pedido, nenhuma mutação local antes da
+// confirmação do backend, refresh real via loadPedidosFromSb() após sucesso,
+// tratamento de PT412 sem sobrescrever o banco, e preservação do request_id
+// em falhas de rede ambíguas (para permitir retry seguro).
+var _lifecycleReqIds = {};
+function _lifecycleReqId(action, pedidoId){
+  var key = action+':'+pedidoId;
+  if(!_lifecycleReqIds[key]) _lifecycleReqIds[key] = crypto.randomUUID();
+  return _lifecycleReqIds[key];
+}
+function _lifecycleReqClear(action, pedidoId){
+  delete _lifecycleReqIds[action+':'+pedidoId];
+}
+async function _lifecycleRpc(opts){
+  if(!busyLock(opts.busyKey)) return {ok:false, reason:'busy'};
+  var reqId = _lifecycleReqId(opts.action, opts.pedidoId);
+  try{
+    var args = Object.assign({p_request_id:reqId}, opts.args);
+    var res = await _sb.rpc(opts.rpcName, args);
+    if(res.error){
+      var msg = res.error.message||'Erro desconhecido';
+      var code = res.error.code||'';
+      if(code==='PT412' || /conflito de vers|desatualizada/i.test(msg)){
+        try{ await loadPedidosFromSb(); }catch(e){}
+        toast('⚠️ Este pedido foi alterado por outra operação. Dados atualizados — revise antes de tentar novamente.','err');
+        _lifecycleReqClear(opts.action, opts.pedidoId);
+        busyUnlock(opts.busyKey);
+        return {ok:false, reason:'conflict'};
+      }
+      toast('❌ '+msg,'err');
+      _lifecycleReqClear(opts.action, opts.pedidoId);
+      busyUnlock(opts.busyKey);
+      return {ok:false, reason:'business', message: msg};
+    }
+    _lifecycleReqClear(opts.action, opts.pedidoId);
+    try{ await loadPedidosFromSb(); }catch(e){}
+    busyUnlock(opts.busyKey);
+    if(opts.onSuccess) opts.onSuccess(res.data);
+    return {ok:true, data: res.data};
+  }catch(e){
+    console.error('[Fluxy/PED] lifecycle rpc erro de rede ('+opts.rpcName+'):', e);
+    toast('⚠️ Falha de conexão. Tente novamente — nenhuma alteração foi confirmada.','err');
+    busyUnlock(opts.busyKey);
+    return {ok:false, reason:'network'};
+  }
+}
 
 // ── Input sanitizer ───────────────────────────────────��────────────────────
 function sanitize(v){
@@ -7366,15 +7435,14 @@ function chgStatus(id){
 }
 
 function applyStatus(id){
-  var ns = document.getElementById('new-status').value;
-  var peds = getPeds();
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===id){ var old=peds[i].status; peds[i].status=ns; logHist('Status: '+old+' → '+ns, id); break; }
-  }
-  savePeds(peds);
+  // CORREÇÃO FRONTEND 02: nenhuma das transições oferecidas por este
+  // controle (pendente/aprovado/faturado/nota_fiscal) corresponde a uma RPC
+  // transacional oficial (criar_pedido/editar_pedido/aprovar_pedido/
+  // recusar_pedido/cancelar_pedido_admin/cancelar_pedido_gerente/
+  // excluir_pedido). Persistência local direta foi desativada para evitar
+  // divergência silenciosa entre banco e UI — nenhuma RPC foi inventada.
   closeModal();
-  safeRender('pedidos',renderPed);
-  toast('✅ Status atualizado!');
+  toast('⚠️ Esta alteração de status ainda não possui integração transacional com o backend. Nenhuma alteração foi salva.','err');
 }
 
 function cancelPed(id){
@@ -7420,34 +7488,33 @@ function cancelSelChange(){
   if(sel&&wrap) wrap.style.display=(sel.value==='Outro'?'block':'none');
 }
 
-function applyCancel(id){
+async function applyCancel(id){
   if(!isAdm()){toast('Sem permissão.');return;}
-  var sel=document.getElementById('cancel-motivo-sel');
-  var txt=document.getElementById('cancel-motivo-txt');
-  var err=document.getElementById('cancel-err');
-  var motivo=(sel?sel.value:'')||'';
+  var sel = document.getElementById('cancel-motivo-sel');
+  var txt = document.getElementById('cancel-motivo-txt');
+  var err = document.getElementById('cancel-err');
+  var motivo = (sel?sel.value:'')||'';
   if(!motivo){err.textContent='Selecione o motivo.';err.style.display='block';return;}
   if(motivo==='Outro'){
-    motivo=(txt?txt.value||'':'').trim();
+    motivo = (txt?txt.value||'':'').trim();
     if(!motivo){err.textContent='Descreva o motivo.';err.style.display='block';return;}
   }
-  var peds=getPeds();
-  var _pedRefCancel=null;
+  var peds = getPeds();
+  var p = null;
   for(var i=0;i<peds.length;i++){
-   if(peds[i].id===id){
-      if(!isAdm()){err.textContent='Sem permissão.';err.style.display='block';return;}
-      peds[i].status='cancelado';
-      peds[i].commVal=0;           // zero commission on cancel
-      peds[i].cancelMotivo=motivo;
-      peds[i].canceladoPor=SESS.nome;
-      peds[i].canceladoEm=new Date().toISOString();
-            _pedRefCancel=peds[i];
-      break;
-    }
+    if(peds[i].id===id){ p = peds[i]; break; }
   }
-  savePeds(peds);
-       // Sincroniza cancelamento no Supabase (persistencia)
-       if(CLOUD_ENABLED && _pedRefCancel) _pedidoUpsertSb(_pedRefCancel).catch(function(e){ console.error('[Fluxy/PED] erro ao sincronizar cancelamento:', e); });
+  if(!p){err.textContent='Pedido não encontrado.';err.style.display='block';return;}
+  if(!p._sbId || p.versao==null){
+    err.textContent='❌ Pedido sem sincronização com o servidor. Recarregue e tente novamente.';err.style.display='block';return;
+  }
+
+  var r = await _lifecycleRpc({
+    busyKey:'applyCancel', action:'cancelarAdm', pedidoId:p._sbId, rpcName:'cancelar_pedido_admin',
+    args:{ p_pedido_id:p._sbId, p_versao:p.versao, p_motivo: motivo }
+  });
+  if(!r.ok) return;
+
   logHist('Pedido cancelado', id+' — '+motivo+' (por '+SESS.nome+')');
   closeModal();
   safeRender('pedidos',renderPed);
@@ -7507,38 +7574,36 @@ function delPed(id){
   );
 }
 
-function delPedConfirm(id){
-  if(!busyLock('delPed')) return;
-  var motivo=(document.getElementById('del-ped-motivo')||{value:''}).value||'';
-  var peds=getPeds();
-  var p=null;
-  var idx=-1;
+async function delPedConfirm(id){
+  var motivo = (document.getElementById('del-ped-motivo')||{value:''}).value||'';
+  var peds = getPeds();
+  var p = null;
+  var idx = -1;
   for(var i=0;i<peds.length;i++) if(peds[i].id===id){p=peds[i];idx=i;break;}
-  if(!p||idx<0){ busyUnlock('delPed'); closeModal(); toast('Pedido não encontrado.','err'); return; }
+  if(!p||idx<0){ closeModal(); toast('Pedido não encontrado.','err'); return; }
+  if(!p._sbId || p.versao==null){
+    closeModal(); toast('❌ Pedido sem sincronização com o servidor. Recarregue e tente novamente.','err'); return;
+  }
 
-  // Soft delete — keeps data but hides from all views
-  peds[idx].deleted=true;
-  peds[idx].deletedAt=new Date().toISOString();
-  peds[idx].deletedBy=SESS.nome||SESS.userId;
-  if(motivo) peds[idx].deletedMotivo=motivo;
-  savePeds(peds);
-  // Sincroniza exclusão com Supabase (async, sem bloquear)
-  if(CLOUD_ENABLED && id) _pedidoDeleteSb(id).catch(function(e){ console.error('[Fluxy/PED] erro em _pedidoDeleteSb:', e); });
+  var r = await _lifecycleRpc({
+    busyKey:'delPed', action:'excluir', pedidoId:p._sbId, rpcName:'excluir_pedido',
+    args:{ p_pedido_id:p._sbId, p_versao:p.versao, p_motivo: motivo||null }
+  });
+  if(!r.ok) return;
 
   // Remove linked cobrança
-  var cobrs=getCobr();
-  var cobrsNew=cobrs.filter(function(cb){ return cb.pedId!==id; });
+  var cobrs = getCobr();
+  var cobrsNew = cobrs.filter(function(cb){ return cb.pedId!==id; });
   if(cobrsNew.length!==cobrs.length) saveCobr(cobrsNew);
 
   // Log
   logHist('Pedido excluído',id+(motivo?' — '+motivo:'')+(p.cliNome?' · '+p.cliNome:''));
 
-  busyUnlock('delPed');
   closeModal();
   toast('🗑️ Pedido '+id+' excluído.','ok');
 
   // Refresh current view
-  var refreshMap={
+  var refreshMap = {
     'pedidos':renderPed,'gerente':renderGerente,'historico':renderHist,
     'relatorios':renderRel,'comissoes':renderComm,'dashboard':renderDash
   };
@@ -10292,80 +10357,72 @@ function gerRecusar(pedId){
     +'</div>');
 }
 
-function gerRecusarConfirm(pedId){
-  if(!busyLock('gerRecusar')) return;
+async function gerRecusarConfirm(pedId){
   // Idempotency: prevent double-refusal
-  var _peds2=getPeds();
+  var _peds2 = getPeds();
+  var existing = null;
   for(var _ii=0;_ii<_peds2.length;_ii++){
-    if(_peds2[_ii].id===pedId&&(_peds2[_ii].status==='recusado_ger'||_peds2[_ii].status==='cancelado_ger')){
-      busyUnlock('gerRecusar');
-      toast('⚠️ Pedido já foi recusado ou cancelado.','err');
-      closeModal(); return;
-    }
-  }
-  var mot=(document.getElementById('ger-recusa-mot')||{value:''}).value.trim();
-  if(!mot){toast('Informe o motivo da recusa.');return;}
-  var peds=getPeds();
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===pedId){
-      peds[i].status='recusado_ger';
-      peds[i].gerenteObs=mot;
-      peds[i].recusadoPor=SESS.nome;
-      peds[i].recusadoEm=new Date().toISOString();
-      // Keep commVal intact — recusal doesn't remove commission
+    if(_peds2[_ii].id===pedId){
+      existing = _peds2[_ii];
+      if(existing.status==='recusado_ger'||existing.status==='cancelado_ger'){
+        toast('⚠️ Pedido já foi recusado ou cancelado.','err');
+        closeModal(); return;
+      }
       break;
     }
   }
-  savePeds(peds);
+  var mot = (document.getElementById('ger-recusa-mot')||{value:''}).value.trim();
+  if(!mot){toast('Informe o motivo da recusa.');return;}
+  if(!existing || !existing._sbId || existing.versao==null){
+    toast('❌ Pedido sem sincronização com o servidor. Recarregue e tente novamente.','err');
+    return;
+  }
+
+  var r = await _lifecycleRpc({
+    busyKey:'gerRecusar', action:'recusar', pedidoId:existing._sbId, rpcName:'recusar_pedido',
+    args:{ p_pedido_id:existing._sbId, p_versao:existing.versao, p_motivo: mot }
+  });
+  if(!r.ok) return;
+
   logHist('Gerente recusou pedido',pedId+' · '+mot);
   closeModal();
   safeRender('gerente',renderGerente);
-  busyUnlock('gerRecusar');
   toast('⛔ Pedido recusado. Vendedor notificado.');
 }
 
-function gerApproveConfirm(pedId){
-  if(!busyLock('gerApprove')) return;
-  var obs=(document.getElementById('ger-aprov-obs')||{value:''}).value||'';
-  var peds=getPeds();
-  // IDEMPOTENCY GUARD: prevent double-approval
-  var existing=null;
+async function gerApproveConfirm(pedId){
+  var obs = (document.getElementById('ger-aprov-obs')||{value:''}).value||'';
+  var peds = getPeds();
+  var existing = null;
   for(var ii=0;ii<peds.length;ii++) if(peds[ii].id===pedId){existing=peds[ii];break;}
-  if(existing&&(existing.status==='aprovado_ger'||existing.status==='aprovado')){
-    busyUnlock('gerApprove');
+  if(existing && (existing.status==='aprovado_ger'||existing.status==='aprovado')){
     toast('⚠️ Pedido já foi aprovado.','err');
     closeModal();
     safeRender('gerente',renderGerente);
     return;
   }
-  if(existing&&existing.commProcessed){
-    busyUnlock('gerApprove');
-    toast('⚠️ Comissão já processada para este pedido.','err');
-    closeModal();
+  if(!existing || !existing._sbId || existing.versao==null){
+    toast('❌ Pedido sem sincronização com o servidor. Recarregue e tente novamente.','err');
     return;
   }
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===pedId){
-      peds[i].status='aprovado_ger';
-      peds[i].aprovadoEm=new Date().toISOString();
-      peds[i].gerenteAprovId=SESS.userId;
-      peds[i].gerenteAprovNome=SESS.nome;
-      if(obs) peds[i].gerenteObs=obs;
-      // Persist commission at approval time — locked with commProcessed flag
-      peds[i].commVal=calcCommForCart(peds[i].itens||[],0);
-      peds[i].commProcessed=true; // prevents double-commission calculation
-      break;
-    }
+
+  var r = await _lifecycleRpc({
+    busyKey:'gerApprove', action:'aprovar', pedidoId:existing._sbId, rpcName:'aprovar_pedido',
+    args:{ p_pedido_id:existing._sbId, p_versao:existing.versao, p_observacao: obs||null }
+  });
+  if(!r.ok) return;
+
+  // Baixa de estoque na aprovação — efeito local legado sem RPC equivalente.
+  // Protegido por commProcessed para evitar duplicação em replays idempotentes.
+  var refreshed = getPeds();
+  var approvedPed = null;
+  for(var _aa=0;_aa<refreshed.length;_aa++) if(refreshed[_aa].id===pedId){approvedPed=refreshed[_aa];break;}
+  if(approvedPed && !approvedPed.commProcessed){
+    try{ estBaixaPedido(approvedPed); approvedPed.commProcessed = true; savePeds(refreshed); }catch(e){}
   }
-  var approvedPed=null;
-  for(var _aa=0;_aa<peds.length;_aa++) if(peds[_aa].id===pedId){approvedPed=peds[_aa];break;}
-  savePeds(peds);
-  // Baixa estoque na aprovação do gerente
-  if(approvedPed){ try{ estBaixaPedido(approvedPed); }catch(e){} }
   logHist('Gerente aprovou pedido',pedId+(obs?' · '+obs:''));
   closeModal();
   safeRender('gerente',renderGerente);
-  busyUnlock('gerApprove');
   toast('✅ Pedido aprovado!','ok');
 }
 
@@ -10379,38 +10436,34 @@ function gerCancel(pedId){
     +'</div>');
 }
 
-function gerCancelConfirm(pedId){
-  if(!busyLock('gerCancel')) return;
-  var _peds3=getPeds();
+async function gerCancelConfirm(pedId){
+  var _peds3 = getPeds();
+  var existing = null;
   for(var _jj=0;_jj<_peds3.length;_jj++){
-    if(_peds3[_jj].id===pedId&&(_peds3[_jj].status==='cancelado_ger')){
-      busyUnlock('gerCancel');
-      toast('��️ Pedido já foi cancelado.','err');
-      closeModal(); return;
-    }
-  }
-  var mot=(document.getElementById('ger-cancel-mot')||{value:''}).value||'Cancelado pelo gerente';
-  var peds=getPeds();
-     var _pedRefGerCancel=null;
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===pedId){
-      peds[i].status='cancelado_ger';
-      peds[i].cancelMotivo=mot;
-      peds[i].gerenteObs=mot;
-      peds[i].canceladoPor=SESS.nome;
-      peds[i].canceladoEm=new Date().toISOString();
-      peds[i].commVal=0;
-             _pedRefGerCancel=peds[i];
+    if(_peds3[_jj].id===pedId){
+      existing = _peds3[_jj];
+      if(existing.status==='cancelado_ger'){
+        toast('⚠️ Pedido já foi cancelado.','err');
+        closeModal(); return;
+      }
       break;
     }
   }
-  savePeds(peds);
-       // Sincroniza cancelamento no Supabase (persistencia)
-       if(CLOUD_ENABLED && _pedRefGerCancel) _pedidoUpsertSb(_pedRefGerCancel).catch(function(e){ console.error('[Fluxy/PED] erro ao sincronizar cancelamento (gerente):', e); });
-  logHist('Gerente cancelou pedido',pedId+' · '+mot);
+  var mot = (document.getElementById('ger-cancel-mot')||{value:''}).value||'';
+  if(!existing || !existing._sbId || existing.versao==null){
+    toast('❌ Pedido sem sincronização com o servidor. Recarregue e tente novamente.','err');
+    return;
+  }
+
+  var r = await _lifecycleRpc({
+    busyKey:'gerCancel', action:'cancelarGer', pedidoId:existing._sbId, rpcName:'cancelar_pedido_gerente',
+    args:{ p_pedido_id:existing._sbId, p_versao:existing.versao, p_motivo: mot||null }
+  });
+  if(!r.ok) return;
+
+  logHist('Gerente cancelou pedido',pedId+' · '+(mot||'Cancelado pelo gerente'));
   closeModal();
   safeRender('gerente',renderGerente);
-  busyUnlock('gerCancel');
   toast('❌ Pedido cancelado.');
 }
 
@@ -13391,75 +13444,60 @@ function epUpdateTotal(){
     +'<div class="row-between fs11"><span class="t3">Comissão estimada</span><span class="mono" style="color:var(--purple)">'+fmt(comm)+'</span></div>';
 }
 
-function saveEditPedFull(){
-  if(!busyLock('saveEditPed')) return;
-  var id=_FLUXI_UI.ep.id;
-  var newItens=_FLUXI_UI.ep.itens;
-  var err=document.getElementById('ep-err');
-  if(err){err.style.display='none';}
+async function saveEditPedFull(){
+  var id = _FLUXI_UI.ep.id;
+  var newItens = _FLUXI_UI.ep.itens;
+  var err = document.getElementById('ep-err');
+  if(err){err.style.display = 'none';}
 
   // Validation
   if(!newItens||!newItens.length){
-    if(err){err.textContent='❌ Pedido precisa de ao menos 1 produto.';err.style.display='block';}
-    busyUnlock('saveEditPed'); return;
+    if(err){err.textContent = '❌ Pedido precisa de ao menos 1 produto.';err.style.display = 'block';}
+    return;
   }
   for(var i=0;i<newItens.length;i++){
     if((newItens[i].qty||0)<1){
-      if(err){err.textContent='❌ Quantidade inválida: '+newItens[i].nome;err.style.display='block';}
-      busyUnlock('saveEditPed'); return;
+      if(err){err.textContent = '❌ Quantidade inválida: '+newItens[i].nome;err.style.display = 'block';}
+      return;
     }
   }
 
-  var peds=getPeds();
-  var p=null; var idx=-1;
+  var peds = getPeds();
+  var p = null; var idx = -1;
   for(var i=0;i<peds.length;i++){if(peds[i].id===id){p=peds[i];idx=i;break;}}
-  if(!p||idx<0){busyUnlock('saveEditPed'); return;}
+  if(!p||idx<0){ return; }
 
-  var remSave=getPedidoEditRemaining(p);
-  if(!isAdm()&&!isGer()&&remSave<=0){
-    if(err){err.textContent='⏱️ Prazo de edição expirou.';err.style.display='block';}
-    busyUnlock('saveEditPed'); return;
+  var remSave = getPedidoEditRemaining(p);
+  if(!isAdm() && !isGer() && remSave<=0){
+    if(err){err.textContent = '⏱️ Prazo de edição expirou. Aguarde aprovação do gerente.';err.style.display = 'block';}
+    return;
   }
-  if(isVend()&&p.vendId!==SESS.userId){
-    if(err){err.textContent='Sem permissão.';err.style.display='block';}
-    busyUnlock('saveEditPed'); return;
-  }
-
-  var discEl=document.getElementById('ep-disc');
-  var obsEl=document.getElementById('ep-obs');
-  var saleSub=newItens.reduce(function(s,it){return s+(it.preco||0)*(it.qty||1);},0);
-  var maxDisc=Math.floor(saleSub*0.8*100)/100;
-  var rawDisc=discEl?parseFloat(discEl.value)||0:0;
-  var disc=Math.min(rawDisc,maxDisc);
-  var total=Math.max(0,saleSub-disc);
-  var newObs=obsEl?obsEl.value||'':'';
-  var commVal=calcCommForCart(newItens,0);
-
-  // If ADM/GER edits an already-approved order, reset for re-approval
-  // Vendors can't reach here on approved orders (canEditPedido blocks them)
-  var wasApproved=(isAdm()||isGer())&&(p.status==='aprovado_ger'||p.status==='aprovado');
-  if(wasApproved){
-    peds[idx].status='pendente_ger';
-    peds[idx].aprovadoEm=null;
-    peds[idx].commProcessed=false;
-    peds[idx].gerenteAprovId=null;
-    peds[idx].gerenteAprovNome=null;
-    logHist('Pedido editado após aprovação — aguarda re-aprovação',id);
+  // CORREÇÃO FRONTEND 02: pedido precisa estar sincronizado com o backend
+  // (id real + versão real) antes de qualquer chamada transacional.
+  if(!p._sbId || p.versao==null){
+    if(err){err.textContent = '❌ Pedido sem sincronização com o servidor. Recarregue a página e tente novamente.';err.style.display = 'block';}
+    return;
   }
 
-  peds[idx].itens=JSON.parse(JSON.stringify(newItens));
-  peds[idx].sub=saleSub;
-  peds[idx].disc=disc;
-  peds[idx].total=total;
-  peds[idx].obs=newObs;
-  peds[idx].commVal=commVal;
-  peds[idx].editadoEm=new Date().toISOString();
-  peds[idx].editadoPor=SESS.nome||SESS.userId;
-  savePeds(peds);
+  var discEl = document.getElementById('ep-disc');
+  var obsEl = document.getElementById('ep-obs');
+  var saleSub = newItens.reduce(function(s,it){return s+(it.preco||0)*(it.qty||1);},0);
+  var maxDisc = Math.floor(saleSub*0.8*100)/100;
+  var rawDisc = discEl?parseFloat(discEl.value)||0:0;
+  var disc = Math.min(rawDisc,maxDisc);
+  var total = Math.max(0,saleSub-disc);
+  var newObs = obsEl?obsEl.value||'':'';
+  var itensRpc = newItens.map(function(it){ return {produto_id: it.prodId, quantidade: it.qty, preco_unitario: it.preco}; });
+  var wasApproved = (isAdm()||isGer()) && (p.status==='aprovado_ger'||p.status==='aprovado');
+
+  var r = await _lifecycleRpc({
+    busyKey:'saveEditPed', action:'editar', pedidoId:p._sbId, rpcName:'editar_pedido',
+    args:{ p_pedido_id:p._sbId, p_versao:p.versao, p_itens:itensRpc, p_desconto:disc, p_observacoes:newObs }
+  });
+  if(!r.ok) return;
+
   logHist('Editou pedido',id+' → '+fmt(total)+(newObs?' · '+newObs:''));
-
-  _FLUXI_UI.ep.id=null; _FLUXI_UI.ep.itens=null;
-  busyUnlock('saveEditPed');
+  _FLUXI_UI.ep.id = null; _FLUXI_UI.ep.itens = null;
   closeModal();
   safeRender('pedidos',renderPed);
   if(wasApproved) toast('⚠️ Pedido editado. Enviado para re-aprovação.','ok');
