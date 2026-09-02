@@ -6804,7 +6804,7 @@ function renderPed(){
     for(var t=0;t<tabs.length;t++){
       var tv=tabs[t];
       var cnt=tv==='todos'?myPeds.length:0;
-      if(tv!=='todos'){for(var j=0;j<myPeds.length;j++)if(myPeds[j].status===tv||(tv==='pendente'&&myPeds[j].status==='pendente_ger'))cnt++;}
+      if(tv!=='todos'){for(var j=0;j<myPeds.length;j++)if(myPeds[j].status===tv||(tv==='pendente'&&myPeds[j].status==='pendente_ger')||(tv==='aprovado'&&myPeds[j].status==='aprovado_ger'))cnt++;}
       var btn=document.createElement('button');
       btn.className='tab'+(pedFil===tv?' on':'');
       btn.textContent=tv.charAt(0).toUpperCase()+tv.slice(1)+' ('+cnt+')';
@@ -6816,7 +6816,7 @@ function renderPed(){
 
   // Status filter
   var list=myPeds;
-  if(pedFil!=='todos'){ list=[]; for(var i=0;i<myPeds.length;i++) if(myPeds[i].status===pedFil||(pedFil==='pendente'&&myPeds[i].status==='pendente_ger')) list.push(myPeds[i]); }
+  if(pedFil!=='todos'){ list=[]; for(var i=0;i<myPeds.length;i++) if(myPeds[i].status===pedFil||(pedFil==='pendente'&&myPeds[i].status==='pendente_ger')||(pedFil==='aprovado'&&myPeds[i].status==='aprovado_ger')) list.push(myPeds[i]); }
 
   var el=document.getElementById('ped-list');
   if(!el) return;
@@ -10015,7 +10015,7 @@ function getGerPeds(){
   var result=[];
   for(var i=0;i<peds.length;i++){
     var p=peds[i];
-    if(p.paraGerente || p.status==='pendente' || p.status==='pendente_ger') result.push(p);
+    if(p.paraGerente || p.status==='pendente' || p.status==='pendente_ger' || p.status==='aprovado_ger' || p.status==='recusado_ger' || p.status==='cancelado_ger') result.push(p);
   }
   return result;
 }
