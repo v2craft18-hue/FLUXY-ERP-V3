@@ -2668,60 +2668,13 @@ async function loadPedidosFromSb(){
 }
 
 async function _pedidoUpsertSb(pedObj){
-  // Insert ou update de pedido + itens no Supabase (async)
-  if(!CLOUD_ENABLED || !_sb || !SESS) return null;
-  var sbObj = _pedidoToSb(pedObj);
-  if(!sbObj) return null;
-  
-  try {
-    // Upsert pedido (cabeçalho)
-    // Opção A: numero é TEXT (ex.: 'PED-0005'). Upsert idempotente por (empresa_id, numero).
-    var { data: pedData, error: pedErr } = await _sb
-      .from('pedidos')
-      .upsert([{ ...sbObj }], { onConflict: 'empresa_id,numero' })
-      .select()
-      .single();
-    
-    if(pedErr) {
-      console.error('[Fluxy/PED] Erro ao upsert pedido:', pedErr.message);
-      return null;
-    }
-    
-    // Sincronizar itens
-    if(pedData && pedObj.itens && pedObj.itens.length > 0){
-      for(var i=0; i<pedObj.itens.length; i++){
-        var itemSb = _pedidoItemToSb(pedObj.itens[i], pedData.id);
-        await _sb
-          .from('pedido_itens')
-          .upsert([{ ...itemSb, pedido_id: pedData.id }])
-          .eq('empresa_id', SESS.empresaId);
-      }
-    }
-    
-    console.log('[Fluxy/PED] Pedido '+pedObj.id+' salvo no Supabase com '+((pedObj.itens||[]).length)+' itens');
-    return pedData;
-  } catch(e) {
-    console.error('[Fluxy/PED] Erro inesperado em _pedidoUpsertSb:', e.message);
-    return null;
-  }
+  console.warn('[Fluxy/PED] _pedidoUpsertSb desativado: use as RPCs oficiais de lifecycle.');
+  return null;
 }
-
 async function _pedidoDeleteSb(id){
-  // Soft delete (deleted=true) no Supabase
-  if(!CLOUD_ENABLED || !_sb || !SESS || !id) return;
-  try {
-    await _sb
-      .from('pedidos')
-      .update({ deleted: true })
-      .eq('numero', id)
-      .eq('empresa_id', SESS.empresaId);
-    
-    console.log('[Fluxy/PED] Pedido '+id+' marcado como deletado no Supabase');
-  } catch(e) {
-    console.error('[Fluxy/PED] Erro inesperado em _pedidoDeleteSb:', e.message);
-  }
+  console.warn('[Fluxy/PED] _pedidoDeleteSb desativado: use excluir_pedido/cancelar_pedido via lifecycle.');
+  return null;
 }
-
 function getPeds(includeDeleted){
   var all=stor_get(KEYS.peds)||[];
   // Pre-stamp _ts once on load — avoid repeated Date.parse in every sort/filter
