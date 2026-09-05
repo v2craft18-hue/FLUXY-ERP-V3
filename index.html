@@ -6195,8 +6195,13 @@ function renderProd(){
     var p=list[i];
     var commBadge='';
     if(isAdm()){
-      if(p.commType==='caixa') commBadge='<span style="font-size:10px;font-weight:700;background:var(--greeng);color:#6EE7B7;border:1px solid rgba(16,185,129,.25);padding:2px 8px;border-radius:999px;margin-left:6px">Caixa R$'+(p.commMeta||0)+'</span>';
-      else commBadge='<span style="font-size:10px;font-weight:700;background:var(--blueg);color:#93C5FD;border:1px solid rgba(59,130,246,.25);padding:2px 8px;border-radius:999px;margin-left:6px">'+(p.commPct!=null?p.commPct:6.3)+'% comissão</span>';
+      if(p.officialCommType==='caixa' && p.officialCommMeta!=null && p.officialPrecoBaseComissao!=null){
+        commBadge='<span style="font-size:10px;font-weight:700;background:var(--greeng);color:#6EE7B7;border:1px solid rgba(16,185,129,.25);padding:2px 8px;border-radius:999px;margin-left:6px">Caixa oficial R$'+p.officialCommMeta+'</span>';
+      } else if(p.officialCommType==='pct' && p.officialCommPct!=null){
+        commBadge='<span style="font-size:10px;font-weight:700;background:var(--blueg);color:#93C5FD;border:1px solid rgba(59,130,246,.25);padding:2px 8px;border-radius:999px;margin-left:6px">'+p.officialCommPct+'% oficial</span>';
+      } else {
+        commBadge='<span style="font-size:10px;font-weight:700;background:var(--yellowg);color:#FCD34D;border:1px solid rgba(245,158,11,.25);padding:2px 8px;border-radius:999px;margin-left:6px">Comissão não configurada</span>';
+      }
     }
     var nfBadge=p.ncm?'<span style="font-size:9px;font-weight:700;background:var(--yellowg);color:#FCD34D;border:1px solid rgba(245,158,11,.25);padding:2px 7px;border-radius:999px;margin-left:4px">NF: '+p.cfop+'</span>':'';
     html+='<div class="card">'
@@ -6632,7 +6637,7 @@ function nvFilterProds(){
     var p=activos[i];
     var inCart=null;
     for(var j=0;j<NV.cart.length;j++) if(NV.cart[j].pId===p.id){inCart=NV.cart[j];break;}
-    var commTag=p.commType==='caixa'?'<span style="font-size:10px;color:var(--green)"> Caixa R$'+(p.commMeta||0)+'</span>':'<span style="font-size:10px;color:var(--blue)"> '+(p.commPct!=null?p.commPct:6.3)+'%</span>';
+    var commTag=p.officialCommType==='caixa'&&p.officialCommMeta!=null?'<span style="font-size:10px;color:var(--green)"> Caixa oficial R$'+p.officialCommMeta+'</span>':(p.officialCommType==='pct'&&p.officialCommPct!=null?'<span style="font-size:10px;color:var(--blue)"> '+p.officialCommPct+'% oficial</span>':'<span style="font-size:10px;color:var(--yellow)"> Comissão não configurada</span>');
     var card=document.createElement('div');
     card.className='card mb6';
     var btnsHtml=inCart
@@ -6733,10 +6738,7 @@ function nvAdd(pId){
   NV.cart.push({
     pId:p.id, nome:p.nome, emoji:p.emoji||'📦',
     preco:p.preco, precoOrig:p.preco,
-    un:p.un||'un', qty:1,
-    commType:p.commType||'pct',
-    commMeta:parseFloat(p.commMeta)||0,
-    commPct:parseFloat(p.commPct)||6.3
+    un:p.un||'un', qty:1
   });
   // On step 2, only refresh product list — preserve search input and focus
   if(NV.step===2){
