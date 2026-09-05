@@ -3030,6 +3030,14 @@ function _prodFromSb(row){
     pesoLiq:       row.peso_liq || 0,
     ativo:         row.ativo !== false,
     origem:        row.origem || '0',
+    // M1B-B1.1: preserva a configuracao oficial de comissao vinda do banco.
+    // NULL continua NULL; nenhum fallback de 5%/6,3% e criado aqui.
+    commType:                row.comm_type == null ? null : row.comm_type,
+    commPct:                 row.comm_pct == null ? null : Number(row.comm_pct),
+    commMeta:                row.comm_meta == null ? null : Number(row.comm_meta),
+    precoBaseComissao:       row.preco_base_comissao == null ? null : Number(row.preco_base_comissao),
+    commConfigAtualizadoEm:  row.comm_config_atualizado_em || null,
+    commConfigAtualizadoPor: row.comm_config_atualizado_por || null,
     criadoEm:      row.criado_em
   };
 }
