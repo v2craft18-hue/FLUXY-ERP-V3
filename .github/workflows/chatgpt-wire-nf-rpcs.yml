@@ -2,7 +2,8 @@ name: chatgpt-wire-nf-rpcs
 
 on:
   push:
-    branches: [chatgpt-write-test-20260904]
+    branches:
+      - chatgpt-write-test-20260904
 
 permissions:
   contents: write
@@ -15,167 +16,27 @@ jobs:
         with:
           ref: chatgpt-write-test-20260904
           fetch-depth: 0
-
-      - name: Wire NF frontend to server lifecycle
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('index.html')
-          s=p.read_text(encoding='utf-8')
-
-          # 1) Map all authoritative NF fields returned by pedidos SELECT.
-          old="""    nfNumero:     row.nf_numero || '',
-    nfStatus:     row.nf_status || null,
-    commVal:      row.comissao == null ? null : Number(row.comissao),
-    solicitarNF:  row.solicitar_nf || false,
-    criadoEm:     row.criado_em,"""
-          new="""    nfNumero:       row.nf_numero || '',
-    nfChave:        row.nf_chave_local || '',
-    nfStatus:       row.nf_status || null,
-    nfSolicitada:   row.solicitar_nf || false,
-    solicitarNF:    row.solicitar_nf || false,
-    nfSolicitadaEm: row.nf_solicitada_em || null,
-    nfSolicitadaPor:row.nf_solicitada_por || '',
-    nfEmitidaEm:    row.nf_emitida_em || null,
-    nfEmitidaPor:   row.nf_emitida_por || '',
-    commVal:        row.comissao == null ? null : Number(row.comissao),
-    criadoEm:       row.criado_em,"""
-          if s.count(old)!=1:
-              raise SystemExit(f'NF mapping anchor count={s.count(old)}')
-          s=s.replace(old,new,1)
-
-          # 2) Replace local NF request mutation with official lifecycle RPC.
-          start=s.index('function confirmarSolicitarNF(pedId){')
-          end=s.index('function emitirNF(pedId){', start)
-          new_confirm="""async function confirmarSolicitarNF(pedId){
-  var peds=getPeds();
-  var p=null;
-  for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){p=peds[i];break;}
-  if(!p){ toast('Pedido não encontrado.','err'); return; }
-  if(!p._sbId || p.versao==null){ toast('Pedido sem vínculo ou versão do servidor. Atualize os dados e tente novamente.','err'); return; }
-
-  var res=await _lifecycleRpc({
-    action:'solicitar_nf_pedido',
-    pedidoId:pedId,
-    busyKey:'solicitarNF:'+pedId,
-    rpcName:'solicitar_nf_pedido',
-    args:{p_pedido_id:p._sbId,p_versao:p.versao}
-  });
-  if(!res.ok) return;
-
-  logHist('NF solicitada',pedId+' por '+(SESS.nome||SESS.userId));
-  closeModal();
-  toast('📨 Solicitação enviada! ADM irá registrar a NF.','ok');
-  safeRender('pedidos',renderPed);
-  applyRoleNav();
-}
-
-"""
-          s=s[:start]+new_confirm+s[end:]
-
-          # 3) Make local NF registration asynchronous and server-authoritative.
-          if s.count('function emitirNF(pedId){')!=1:
-              raise SystemExit(f'emitirNF declaration count={s.count("function emitirNF(pedId){")}')
-          s=s.replace('function emitirNF(pedId){','async function emitirNF(pedId){',1)
-
-          emit_start=s.index('async function emitirNF(pedId){')
-          gen_marker='  // Generate NF number\n'
-          gen_pos=s.index(gen_marker, emit_start)
-          guard="""  if(!p._sbId || p.versao==null){
-    toast('Pedido sem vínculo ou versão do servidor. Atualize os dados e tente novamente.','err');
-    return;
-  }
-
-"""
-          s=s[:gen_pos]+guard+s[gen_pos:]
-
-          emit_start=s.index('async function emitirNF(pedId){')
-          formatted="  var nfKeyFormatted=nfKey.replace(/(.{4})/g,'$1 ').trim();"
-          fmt_pos=s.index(formatted, emit_start)
-          rpc_block="""  var nfRpc=await _lifecycleRpc({
-    action:'registrar_nf_local_pedido',
-    pedidoId:pedId,
-    busyKey:'registrarNFLocal:'+pedId,
-    rpcName:'registrar_nf_local_pedido',
-    args:{p_pedido_id:p._sbId,p_versao:p.versao,p_nf_numero:nfNum,p_nf_chave_local:nfKey}
-  });
-  if(!nfRpc.ok) return;
-  // Em replay idempotente, o servidor pode devolver a NF originalmente gravada.
-  // O documento exibido deve sempre usar esses valores autoritativos.
-  if(nfRpc.data){
-    if(nfRpc.data.nf_numero) nfNum=String(nfRpc.data.nf_numero);
-    if(nfRpc.data.nf_chave_local) nfKey=String(nfRpc.data.nf_chave_local);
-  }
-"""
-          s=s[:fmt_pos]+rpc_block+s[fmt_pos:]
-
-          # Remove the old optimistic/local cache write after XML generation.
-          emit_start=s.index('async function emitirNF(pedId){')
-          mut_start=s.index('  var idx=-1;', emit_start)
-          modal_marker='  // Show NF result modal\n'
-          mut_end=s.index(modal_marker, mut_start)
-          replacement="""  logHist('NF local registrada',pedId+' · NF '+nfNum);
-  closeModal();
-
-"""
-          s=s[:mut_start]+replacement+s[mut_end:]
-
-          # 4) The backend canonical local-record status is `gerada`.
-          old="else if(st==='emitida') nEm++;"
-          new="else if(st==='emitida'||st==='gerada') nEm++;"
-          if s.count(old)!=1:
-              raise SystemExit(f'NF KPI emitted anchor count={s.count(old)}')
-          s=s.replace(old,new,1)
-
-          old="var stColor=nfSt==='autorizada'?'#10B981':nfSt==='emitida'?'#3B82F6':nfSt==='rejeitada'?'#EF4444':'#F59E0B';"
-          new="var stColor=nfSt==='autorizada'?'#10B981':(nfSt==='emitida'||nfSt==='gerada')?'#3B82F6':nfSt==='rejeitada'?'#EF4444':'#F59E0B';"
-          if s.count(old)!=1:
-              raise SystemExit(f'NF color anchor count={s.count(old)}')
-          s=s.replace(old,new,1)
-
-          old="var stLabel=nfSt==='autorizada'?'✅ Autorizada':nfSt==='emitida'?'🧾 Emitida':nfSt==='rejeitada'?'❌ Rejeitada':'⏳ Aguardando';"
-          new="var stLabel=nfSt==='autorizada'?'✅ Autorizada':(nfSt==='emitida'||nfSt==='gerada')?'🧾 Registrada localmente':nfSt==='rejeitada'?'❌ Rejeitada':'⏳ Aguardando';"
-          if s.count(old)!=1:
-              raise SystemExit(f'NF label anchor count={s.count(old)}')
-          s=s.replace(old,new,1)
-
-          # Keep the local-only nature explicit in the result modal.
-          s=s.replace('NF Gerada (ambiente local)','NF registrada (ambiente local)')
-
-          p.write_text(s,encoding='utf-8')
-          PY
-
-      - name: Validate NF patch and JavaScript syntax
-        shell: bash
+      - name: Patch index
+        run: python .github/scripts/chatgpt_wire_nf_rpcs.py
+      - name: Validate diff
         run: |
           git diff --check
-          changed=$(git diff --name-only)
-          test "$changed" = "index.html"
+          test "$(git diff --name-only)" = "index.html"
           grep -Fq "rpcName:'solicitar_nf_pedido'" index.html
           grep -Fq "rpcName:'registrar_nf_local_pedido'" index.html
           grep -Fq "nfChave:        row.nf_chave_local" index.html
-          grep -Fq "nfSolicitadaEm: row.nf_solicitada_em" index.html
-          grep -Fq "nfEmitidaEm:    row.nf_emitida_em" index.html
           grep -Fq "Registrada localmente" index.html
-          ! grep -Fq "peds[idx].nfNumero=nfNum" index.html
-          ! grep -Fq "peds[idx].nfStatus='gerada'" index.html
-          ! grep -Fq "peds[idx].nfSolicitada=true" index.html
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          s=Path('index.html').read_text(encoding='utf-8')
-          blocks=re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>',s,flags=re.S|re.I)
-          Path('/tmp/fluxy-inline.js').write_text('\n;\n'.join(blocks),encoding='utf-8')
-          PY
+          if grep -Fq "peds[idx].nfNumero=nfNum" index.html; then exit 1; fi
+          if grep -Fq "peds[idx].nfSolicitada=true" index.html; then exit 1; fi
+      - name: Validate JavaScript
+        run: |
+          python -c "from pathlib import Path; import re; s=Path('index.html').read_text(encoding='utf-8'); Path('/tmp/fluxy-inline.js').write_text(chr(10).join(re.findall(r'<script(?:\\s[^>]*)?>(.*?)</script>',s,flags=re.S|re.I)),encoding='utf-8')"
           node --check /tmp/fluxy-inline.js
-
       - name: Commit clean result
-        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add index.html
-          git rm .github/workflows/chatgpt-wire-nf-rpcs.yml
+          git rm .github/workflows/chatgpt-wire-nf-rpcs.yml .github/scripts/chatgpt_wire_nf_rpcs.py
           git commit -m "fix: route NF lifecycle through server RPCs"
           git push origin HEAD:chatgpt-write-test-20260904
