@@ -6250,21 +6250,31 @@ function openProdModal(editId){
       +'<div class="fs12 t3">Salve o produto primeiro para configurar a comissão oficial.</div>'
       +'</div>';
   } else {
-    var officialTypeLabel=officialType==='pct'?'Percentual':(officialType==='caixa'?'Caixa':'Não configurada');
+    var officialTypeValue=(officialType==='pct'||officialType==='caixa')?officialType:'';
+    var officialPctValue=officialPct==null?'':String(officialPct);
+    var officialMetaValue=officialMeta==null?'':String(officialMeta);
+    var officialBaseValue=officialBase==null?'':String(officialBase);
     officialCommHtml='<div style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);padding:14px;margin-top:10px">'
       +'<div class="card-title" style="margin-bottom:12px">💰 REGRA OFICIAL DE COMISSÃO</div>'
-      +'<div class="field" style="margin-bottom:10px"><label>TIPO</label><div class="fs13 fw7">'+sanitize(officialTypeLabel)+'</div></div>';
-    if(officialType==='pct'){
-      var officialPctTxt=officialPct==null?'—':String(officialPct).replace('.',',')+'%';
-      officialCommHtml+='<div class="field" style="margin-bottom:10px"><label>PERCENTUAL</label><div class="fs13 fw7">'+sanitize(officialPctTxt)+'</div></div>';
-    } else if(officialType==='caixa'){
-      var officialMetaTxt=officialMeta==null?'—':fmt(officialMeta);
-      var officialBaseTxt=officialBase==null?'—':fmt(officialBase);
-      officialCommHtml+='<div class="field" style="margin-bottom:10px"><label>FIXO POR CAIXA</label><div class="fs13 fw7">'+sanitize(officialMetaTxt)+'</div></div>'
-        +'<div class="field" style="margin-bottom:10px"><label>PREÇO-BASE</label><div class="fs13 fw7">'+sanitize(officialBaseTxt)+'</div></div>';
-    } else {
-      officialCommHtml+='<div class="fs12 t3" style="margin-bottom:10px">Comissão oficial ainda não configurada</div>';
-    }
+      +'<div class="field" style="margin-bottom:12px"><label>TIPO</label>'
+        +'<select id="pp-official-comm-type" onchange="prodModalToggleOfficialComm()">'
+          +'<option value=""'+(officialTypeValue===''?' selected':'')+'>Não configurada</option>'
+          +'<option value="pct"'+(officialTypeValue==='pct'?' selected':'')+'>Percentual</option>'
+          +'<option value="caixa"'+(officialTypeValue==='caixa'?' selected':'')+'>Caixa</option>'
+        +'</select>'
+      +'</div>'
+      +'<div id="pp-official-comm-pct-wrap" class="field" style="margin-bottom:12px;display:'+(officialTypeValue==='pct'?'block':'none')+'">'
+        +'<label>PERCENTUAL (%)</label>'
+        +'<input id="pp-official-comm-pct" type="text" inputmode="decimal" value="'+sanitize(officialPctValue)+'" placeholder="Ex: 6,3">'
+      +'</div>'
+      +'<div id="pp-official-comm-caixa-wrap" style="display:'+(officialTypeValue==='caixa'?'block':'none')+'">'
+        +'<div class="field" style="margin-bottom:12px"><label>FIXO POR CAIXA (R$)</label>'
+          +'<input id="pp-official-comm-meta" type="text" inputmode="decimal" value="'+sanitize(officialMetaValue)+'" placeholder="Ex: 5,00">'
+        +'</div>'
+        +'<div class="field" style="margin-bottom:12px"><label>PREÇO-BASE (R$)</label>'
+          +'<input id="pp-official-preco-base" type="text" inputmode="decimal" value="'+sanitize(officialBaseValue)+'" placeholder="Ex: 140,00">'
+        +'</div>'
+      +'</div>';
     if(officialUpdatedAt||officialUpdatedBy){
       var officialAudit=[];
       if(officialUpdatedAt){
@@ -6272,9 +6282,11 @@ function openProdModal(editId){
         officialAudit.push('Última alteração: '+(isNaN(officialDate.getTime())?String(officialUpdatedAt):officialDate.toLocaleString('pt-BR')));
       }
       if(officialUpdatedBy) officialAudit.push('Por: '+String(officialUpdatedBy));
-      officialCommHtml+='<div class="fs11 t3" style="padding-top:8px;border-top:1px solid var(--b1)">'+sanitize(officialAudit.join(' · '))+'</div>';
+      officialCommHtml+='<div class="fs11 t3" style="padding-top:8px;border-top:1px solid var(--b1);margin-bottom:10px">'+sanitize(officialAudit.join(' · '))+'</div>';
     }
-    officialCommHtml+='</div>';
+    officialCommHtml+='<div id="pp-official-comm-err" class="alert err" style="margin-bottom:10px"></div>'
+      +'<button type="button" class="btn btn-p btn-sm" data-id="'+sanitize(String(p.id||''))+'" onclick="saveComissaoOficial(this.dataset.id,this)">💾 Salvar comissão oficial</button>'
+      +'</div>';
   }
   var defBarcode=p&&p.codigoBarras?p.codigoBarras:genBarcode();
   var defSku=p&&p.sku?p.sku:(p?genSKU(p.nome):genSKU(''));
@@ -6332,6 +6344,94 @@ function openProdModal(editId){
       +'<button class="btn btn-p" data-id="'+(editId||'')+'" onclick="saveProd(this.dataset.id)">💾 Salvar</button>'
     +'</div>';
   openModal(html);
+}
+
+function prodModalToggleOfficialComm(){
+  var sel=document.getElementById('pp-official-comm-type');
+  if(!sel) return;
+  var pctWrap=document.getElementById('pp-official-comm-pct-wrap');
+  var caixaWrap=document.getElementById('pp-official-comm-caixa-wrap');
+  if(pctWrap) pctWrap.style.display=sel.value==='pct'?'block':'none';
+  if(caixaWrap) caixaWrap.style.display=sel.value==='caixa'?'block':'none';
+}
+
+function _parseOfficialCommNumber(id){
+  var el=document.getElementById(id);
+  if(!el) return NaN;
+  var raw=String(el.value==null?'':el.value).trim().replace(',','.');
+  if(raw==='') return NaN;
+  return Number(raw);
+}
+
+async function _configurarComissaoProdutoSb(produtoId, config){
+  if(!CLOUD_ENABLED || !_sb || !SESS) throw new Error('Conexão com o servidor indisponível.');
+  if(!(await _hasSupabaseSession())) throw new Error('Sessão Supabase indisponível. Faça login novamente.');
+  var result=await _sb.rpc('configurar_comissao_produto',{
+    p_produto_id:produtoId,
+    p_comm_type:config.commType,
+    p_comm_pct:config.commPct,
+    p_comm_meta:config.commMeta,
+    p_preco_base_comissao:config.precoBase
+  });
+  if(result.error) throw result.error;
+  return result.data;
+}
+
+async function saveComissaoOficial(produtoId, btn){
+  if(!isAdm()) return;
+  produtoId=produtoId||'';
+  var err=document.getElementById('pp-official-comm-err');
+  if(err){ err.style.display='none'; err.textContent=''; }
+  if(!produtoId){
+    if(err){ err.textContent='Salve o produto primeiro para configurar a comissão oficial.'; err.style.display='block'; }
+    return;
+  }
+  if(btn && btn.dataset.busy==='1') return;
+
+  var sel=document.getElementById('pp-official-comm-type');
+  if(!sel) return;
+  var type=sel.value||'';
+  var config={commType:null,commPct:null,commMeta:null,precoBase:null};
+
+  if(type==='pct'){
+    var pct=_parseOfficialCommNumber('pp-official-comm-pct');
+    if(!Number.isFinite(pct)||pct<0){
+      if(err){ err.textContent='Informe um percentual válido (zero ou maior).'; err.style.display='block'; }
+      return;
+    }
+    config.commType='pct'; config.commPct=pct;
+  } else if(type==='caixa'){
+    var meta=_parseOfficialCommNumber('pp-official-comm-meta');
+    var base=_parseOfficialCommNumber('pp-official-preco-base');
+    if(!Number.isFinite(meta)||meta<0){
+      if(err){ err.textContent='Informe um valor fixo por caixa válido (zero ou maior).'; err.style.display='block'; }
+      return;
+    }
+    if(!Number.isFinite(base)||base<0){
+      if(err){ err.textContent='Informe um preço-base válido (zero ou maior).'; err.style.display='block'; }
+      return;
+    }
+    config.commType='caixa'; config.commMeta=meta; config.precoBase=base;
+  } else if(type!==''){
+    if(err){ err.textContent='Tipo de comissão oficial inválido.'; err.style.display='block'; }
+    return;
+  }
+
+  var oldText=btn?btn.textContent:'';
+  if(btn){ btn.dataset.busy='1'; btn.disabled=true; btn.textContent='Salvando...'; }
+  try{
+    await _configurarComissaoProdutoSb(produtoId,config);
+    await loadProdsFromSb();
+    var updated=null, prods=getProds();
+    for(var i=0;i<prods.length;i++) if(prods[i].id===produtoId){updated=prods[i];break;}
+    if(!updated) throw new Error('Comissão salva, mas o produto não foi recarregado. Atualize a página.');
+    openProdModal(produtoId);
+    toast('✅ Comissão oficial salva!');
+  }catch(e){
+    console.error('[Fluxy/PROD] Erro ao salvar comissão oficial:',e);
+    if(err){ err.textContent=(e&&e.message)?e.message:'Não foi possível salvar a comissão oficial.'; err.style.display='block'; }
+    if(btn){ btn.dataset.busy='0'; btn.disabled=false; btn.textContent=oldText||'💾 Salvar comissão oficial'; }
+  }
 }
 
 function saveProd(editId){
