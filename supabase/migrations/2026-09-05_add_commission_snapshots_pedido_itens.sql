@@ -32,32 +32,30 @@ ALTER TABLE public.pedido_itens
     ),
 
   -- Para version=1, a forma da regra capturada deve ser coerente.
+  -- CASE evita que uma combinacao invalida resulte em NULL e passe pelo CHECK.
   -- type NULL significa que o produto estava sem comissao oficial configurada.
   ADD CONSTRAINT chk_comm_snapshot_rule_shape
     CHECK (
       comm_snapshot_version IS DISTINCT FROM 1
-      OR (
-        comm_type_snapshot IS NULL
-        AND comm_pct_snapshot IS NULL
-        AND comm_meta_snapshot IS NULL
-        AND preco_base_snapshot IS NULL
-        AND comissao_item IS NULL
-      )
-      OR (
-        comm_type_snapshot = 'pct'
-        AND comm_pct_snapshot IS NOT NULL
-        AND comm_pct_snapshot >= 0
-        AND comm_meta_snapshot IS NULL
-        AND preco_base_snapshot IS NULL
-      )
-      OR (
-        comm_type_snapshot = 'caixa'
-        AND comm_pct_snapshot IS NULL
-        AND comm_meta_snapshot IS NOT NULL
-        AND comm_meta_snapshot >= 0
-        AND preco_base_snapshot IS NOT NULL
-        AND preco_base_snapshot >= 0
-      )
+      OR CASE
+        WHEN comm_type_snapshot IS NULL THEN
+          comm_pct_snapshot IS NULL
+          AND comm_meta_snapshot IS NULL
+          AND preco_base_snapshot IS NULL
+          AND comissao_item IS NULL
+        WHEN comm_type_snapshot = 'pct' THEN
+          comm_pct_snapshot IS NOT NULL
+          AND comm_pct_snapshot >= 0
+          AND comm_meta_snapshot IS NULL
+          AND preco_base_snapshot IS NULL
+        WHEN comm_type_snapshot = 'caixa' THEN
+          comm_pct_snapshot IS NULL
+          AND comm_meta_snapshot IS NOT NULL
+          AND comm_meta_snapshot >= 0
+          AND preco_base_snapshot IS NOT NULL
+          AND preco_base_snapshot >= 0
+        ELSE FALSE
+      END
     ),
 
   -- Todo item processado pelo motor M2 deve ter valor liquido calculado.
