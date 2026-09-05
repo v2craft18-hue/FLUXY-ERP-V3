@@ -2557,11 +2557,17 @@ function _pedidoFromSb(row){
     total:        row.total || 0,
     obs:          row.observacoes || '',
     pag:          row.pagamento || 'Dinheiro',
-    nfNumero:     row.nf_numero || '',
-    nfStatus:     row.nf_status || null,
-    commVal:      row.comissao == null ? null : Number(row.comissao),
-    solicitarNF:  row.solicitar_nf || false,
-    criadoEm:     row.criado_em,
+    nfNumero:       row.nf_numero || '',
+    nfChave:        row.nf_chave_local || '',
+    nfStatus:       row.nf_status || null,
+    nfSolicitada:   row.solicitar_nf || false,
+    solicitarNF:    row.solicitar_nf || false,
+    nfSolicitadaEm: row.nf_solicitada_em || null,
+    nfSolicitadaPor:row.nf_solicitada_por || '',
+    nfEmitidaEm:    row.nf_emitida_em || null,
+    nfEmitidaPor:   row.nf_emitida_por || '',
+    commVal:        row.comissao == null ? null : Number(row.comissao),
+    criadoEm:       row.criado_em,
     // CORREÇÃO FRONTEND 02: versão real do banco (optimistic concurrency) e
     // campos de auditoria oficiais, mapeados 1:1 das colunas reais de
     // public.pedidos — nunca mais fabricados localmente.
@@ -7309,25 +7315,30 @@ function solicitarNF(pedId){
   );
 }
 
-function confirmarSolicitarNF(pedId){
-  if(!busyLock('solicitarNF')) return;
+async function confirmarSolicitarNF(pedId){
   var peds=getPeds();
-  var idx=-1;
-  for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){idx=i;break;}
-  if(idx<0){ busyUnlock('solicitarNF'); closeModal(); return; }
-  peds[idx].nfSolicitada=true;
-  peds[idx].nfSolicitadaEm=new Date().toISOString();
-  peds[idx].nfSolicitadaPor=SESS.nome||SESS.userId;
-  peds[idx].nfStatus='aguardando';
-  savePeds(peds);
+  var p=null;
+  for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){p=peds[i];break;}
+  if(!p){ toast('Pedido não encontrado.','err'); return; }
+  if(!p._sbId || p.versao==null){ toast('Pedido sem vínculo ou versão do servidor. Atualize os dados e tente novamente.','err'); return; }
+
+  var res=await _lifecycleRpc({
+    action:'solicitar_nf_pedido',
+    pedidoId:pedId,
+    busyKey:'solicitarNF:'+pedId,
+    rpcName:'solicitar_nf_pedido',
+    args:{p_pedido_id:p._sbId,p_versao:p.versao}
+  });
+  if(!res.ok) return;
+
   logHist('NF solicitada',pedId+' por '+(SESS.nome||SESS.userId));
-  busyUnlock('solicitarNF');
   closeModal();
-  toast('📨 Solicitação enviada! ADM irá emitir a NF.','ok');
+  toast('📨 Solicitação enviada! ADM irá registrar a NF.','ok');
   safeRender('pedidos',renderPed);
   applyRoleNav();
 }
-function emitirNF(pedId){
+
+async function emitirNF(pedId){
   var peds=getPeds();
   var p=null;
   for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){p=peds[i];break;}
@@ -7352,12 +7363,31 @@ function emitirNF(pedId){
     return;
   }
 
+  if(!p._sbId || p.versao==null){
+    toast('Pedido sem vínculo ou versão do servidor. Atualize os dados e tente novamente.','err');
+    return;
+  }
+
   // Generate NF number
   var nfNum=p.nfNumero||(Math.floor(Math.random()*900000)+100000).toString();
   var nfKey='35'+new Date().getFullYear().toString().slice(2)+
     '11'+'39760542000106'+
     '55'+'001'+'001'+nfNum.padStart(9,'0')+'1'+
     Math.floor(Math.random()*900000000+100000000).toString()+'1';
+  var nfRpc=await _lifecycleRpc({
+    action:'registrar_nf_local_pedido',
+    pedidoId:pedId,
+    busyKey:'registrarNFLocal:'+pedId,
+    rpcName:'registrar_nf_local_pedido',
+    args:{p_pedido_id:p._sbId,p_versao:p.versao,p_nf_numero:nfNum,p_nf_chave_local:nfKey}
+  });
+  if(!nfRpc.ok) return;
+  // Replay idempotente pode devolver a NF originalmente gravada.
+  // O documento exibido usa sempre os valores autoritativos do servidor.
+  if(nfRpc.data){
+    if(nfRpc.data.nf_numero) nfNum=String(nfRpc.data.nf_numero);
+    if(nfRpc.data.nf_chave_local) nfKey=String(nfRpc.data.nf_chave_local);
+  }
   var nfKeyFormatted=nfKey.replace(/(.{4})/g,'$1 ').trim();
 
   // Build items XML
@@ -7433,23 +7463,13 @@ function emitirNF(pedId){
     +'</infNFe></NFe>\n</nfeProc>';
 
   // Save NF data on pedido
-  var idx=-1;
-  for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){idx=i;break;}
-  if(idx>=0){
-    peds[idx].nfNumero=nfNum;
-    peds[idx].nfChave=nfKey;
-    peds[idx].nfStatus='gerada';
-    peds[idx].nfEmitidaEm=new Date().toISOString();
-    peds[idx].status='nota_fiscal';
-    savePeds(peds);
-  }
-  logHist('NF emitida',pedId+' · NF '+nfNum);
+  logHist('NF local registrada',pedId+' · NF '+nfNum);
   closeModal();
 
   // Show NF result modal
   var html='<div class="modal-title">🧾 Nota Fiscal Gerada</div>'
     +'<div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);border-radius:var(--r2);padding:14px;margin-bottom:16px">'
-      +'<div class="fs10 fw7 t3 mb6" style="letter-spacing:.08em;text-transform:uppercase">✅ NF Gerada (ambiente local)</div>'
+      +'<div class="fs10 fw7 t3 mb6" style="letter-spacing:.08em;text-transform:uppercase">✅ NF registrada (ambiente local)</div>'
       +'<div class="fw8 fs16 t0 mb4">NF nº '+nfNum+'</div>'
       +'<div class="fs10 mono t3" style="word-break:break-all">'+nfKeyFormatted+'</div>'
     +'</div>'
@@ -9807,7 +9827,7 @@ function renderNotas(){
   for(var i=0;i<allNF.length;i++){
     var st=allNF[i].nfStatus||'aguardando';
     if(st==='aguardando') nAg++;
-    else if(st==='emitida') nEm++;
+    else if(st==='emitida'||st==='gerada') nEm++;
     else if(st==='autorizada') nAu++;
     else if(st==='rejeitada') nRej++;
   }
@@ -9838,8 +9858,8 @@ function renderNotas(){
     var vendNome='—';
     for(var j=0;j<users.length;j++) if(users[j].id===p.vendId){vendNome=users[j].nome;break;}
 
-    var stColor=nfSt==='autorizada'?'#10B981':nfSt==='emitida'?'#3B82F6':nfSt==='rejeitada'?'#EF4444':'#F59E0B';
-    var stLabel=nfSt==='autorizada'?'✅ Autorizada':nfSt==='emitida'?'🧾 Emitida':nfSt==='rejeitada'?'❌ Rejeitada':'⏳ Aguardando';
+    var stColor=nfSt==='autorizada'?'#10B981':(nfSt==='emitida'||nfSt==='gerada')?'#3B82F6':nfSt==='rejeitada'?'#EF4444':'#F59E0B';
+    var stLabel=nfSt==='autorizada'?'✅ Autorizada':(nfSt==='emitida'||nfSt==='gerada')?'🧾 Registrada localmente':nfSt==='rejeitada'?'❌ Rejeitada':'⏳ Aguardando';
 
     var card=document.createElement('div');
     card.className='card mb10';
