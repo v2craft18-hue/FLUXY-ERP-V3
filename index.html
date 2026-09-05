@@ -2604,6 +2604,7 @@ function _pedidoItemFromSb(row){
   // Converte item Supabase → local
   if(!row) return null;
   return {
+    itemId:        row.id || null,
     prodId:        row.produto_id || '',
     prodNome:      row.produto_nome || '', nome: row.produto_nome || '',
     qty:           row.quantidade || 0,
@@ -13618,7 +13619,7 @@ async function saveEditPedFull(){
   var disc = Math.min(rawDisc,maxDisc);
   var total = Math.max(0,saleSub-disc);
   var newObs = obsEl?obsEl.value||'':'';
-  var itensRpc = newItens.map(function(it){ return {produto_id: it.prodId, quantidade: it.qty, preco_unitario: it.preco}; });
+  var itensRpc = newItens.map(function(it){ return {item_id: it.itemId || null, produto_id: it.prodId, quantidade: it.qty, preco_unitario: it.preco}; });
   var wasApproved = (isAdm()||isGer()) && (p.status==='aprovado_ger'||p.status==='aprovado');
 
   var r = await _lifecycleRpc({
