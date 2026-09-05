@@ -2559,7 +2559,7 @@ function _pedidoFromSb(row){
     pag:          row.pagamento || 'Dinheiro',
     nfNumero:     row.nf_numero || '',
     nfStatus:     row.nf_status || null,
-    commVal:      row.comissao || 0,
+    commVal:      row.comissao == null ? null : Number(row.comissao),
     solicitarNF:  row.solicitar_nf || false,
     criadoEm:     row.criado_em,
     // CORREÇÃO FRONTEND 02: versão real do banco (optimistic concurrency) e
@@ -2609,7 +2609,15 @@ function _pedidoItemFromSb(row){
     prodNome:      row.produto_nome || '', nome: row.produto_nome || '',
     qty:           row.quantidade || 0,
     preco:         row.preco_unitario || 0,
-    descontoItem:  row.desconto_item || 0
+    totalItem:     row.total_item == null ? null : Number(row.total_item),
+    descontoItem:  row.desconto_item == null ? 0 : Number(row.desconto_item),
+    commSnapshotVersion: row.comm_snapshot_version == null ? null : Number(row.comm_snapshot_version),
+    commTypeSnapshot:    row.comm_type_snapshot || null,
+    commPctSnapshot:     row.comm_pct_snapshot == null ? null : Number(row.comm_pct_snapshot),
+    commMetaSnapshot:    row.comm_meta_snapshot == null ? null : Number(row.comm_meta_snapshot),
+    precoBaseSnapshot:   row.preco_base_snapshot == null ? null : Number(row.preco_base_snapshot),
+    valorLiquidoItem:    row.valor_liquido_item == null ? null : Number(row.valor_liquido_item),
+    comissaoItem:        row.comissao_item == null ? null : Number(row.comissao_item)
   };
 }
 
@@ -9287,13 +9295,40 @@ function prodModalToggleComm(){
 
 function calcCommForPed(ped){
   if(!ped||ped.deleted) return 0; // soft-deleted = zero commission
-  // FINANCIAL RULE: commission ONLY on approved orders
+  // M2: comissão financeira somente em estados aprovados/finais.
   var st=ped.status||'';
   var approved=(st==='aprovado'||st==='aprovado_ger'||st==='nota_fiscal'||st==='faturado'||st==='entregue');
   if(!approved) return 0;
-  // Always recalculate from items — stored commVal may have been saved with old logic
+
+  // Fonte autoritativa: agregado gravado pelo backend no lifecycle M2.
+  if(ped.commVal!=null){
+    var stored=Number(ped.commVal);
+    if(Number.isFinite(stored)&&stored>=0) return stored;
+  }
+
+  // Defesa: se o agregado não veio, um pedido M2 só pode usar snapshots já fechados.
+  if(ped.itens&&ped.itens.length){
+    var sawM2=false, allDef=true, sum=0;
+    for(var i=0;i<ped.itens.length;i++){
+      var it=ped.itens[i]||{};
+      if(it.commSnapshotVersion===1){
+        sawM2=true;
+        if(it.comissaoItem==null){ allDef=false; break; }
+        var ci=Number(it.comissaoItem);
+        if(!Number.isFinite(ci)||ci<0){ allDef=false; break; }
+        sum+=ci;
+      } else {
+        allDef=false;
+      }
+    }
+    if(sawM2) return allDef?Math.round(sum*100)/100:0;
+  }
+
+  // Pedido persistido legado nunca é recalculado usando a regra ATUAL do produto.
+  if(ped._sbId) return 0;
+
+  // Fallback exclusivo para objetos locais legados que nunca foram persistidos.
   if(ped.itens&&ped.itens.length) return calcCommForCart(ped.itens,0);
-  if(typeof ped.commVal==='number') return ped.commVal;
   return 0;
 }
 
