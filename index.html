@@ -6803,7 +6803,7 @@ function nvStep3(){
   var maxDisc=Math.floor(saleSub*0.8*100)/100; // 80% max
   if(disc>maxDisc) disc=maxDisc;
   var total=Math.max(0,saleSub-disc);
-  var commVal=calcCommForCart(NV.cart, disc);
+  var commVal=null;
 
   var html='<div class="card mb8"><div class="fw7 mb12">Passo 3: Confirmar</div>';
   html+='<div class="fw8 mb10" style="color:var(--t0)">'+sanitize(NV.cliNome)+'</div>';
@@ -6866,7 +6866,7 @@ function nvStep3(){
   return html;
 }
 
-var _nvPendingReq={direto:null,gerente:null};function _criarPedidoRpc(modo,gerenteDestinoId,desconto,observacoes){var itens=[];for(var _ii=0;_ii<NV.cart.length;_ii++){var _it=NV.cart[_ii];itens.push({produto_id:_it.pId,quantidade:_it.qty,preco_unitario:_it.preco});}var reqKey=(modo==='gerente')?'gerente':'direto';if(!_nvPendingReq[reqKey])_nvPendingReq[reqKey]=crypto.randomUUID();return _sb.rpc('criar_pedido',{p_request_id:_nvPendingReq[reqKey],p_modo:modo,p_cliente_id:NV.cliId,p_itens:itens,p_desconto:desconto||0,p_observacoes:observacoes||'',p_pagamento:NV.pag||'Dinheiro',p_solicitar_nf:NV.solicitarNF||false,p_gerente_destino_id:gerenteDestinoId||null}).then(function(res){if(!res.error)_nvPendingReq[reqKey]=null;return res;});}function nvFinalizar(){if(!SESS||!SESS.userId){toast('Sessão expirada. Faça login novamente.','err');return;}if(!navigator.onLine){toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err');return;}if(!busyLock('nvFinalizar'))return;if(!NV.cliId||!NV.cart.length)return;var inputs=document.querySelectorAll('[data-pid]');for(var fi=0;fi<inputs.length;fi++){var fel=inputs[fi];var fpId=fel.getAttribute('data-pid');var fval=parseFloat(fel.value)||0;if(fpId&&fval>0)nvEditPreco(fpId,fval);}var pags=document.getElementById('nv-pag');if(pags)NV.pag=pags.value;var discEl=document.getElementById('nv-disc');var rawDisc=discEl?parseFloat(discEl.value)||0:NV.disc||0;var obsEl=document.getElementById('nv-obs');if(obsEl)NV.obs=obsEl.value||'';var nfEl=document.getElementById('nv-solicitar-nf');if(nfEl)NV.solicitarNF=nfEl.checked;var saleSub=0;for(var i=0;i<NV.cart.length;i++)saleSub+=NV.cart[i].preco*NV.cart[i].qty;var maxDisc=Math.floor(saleSub*0.8*100)/100;var disc=Math.min(rawDisc,maxDisc);NV.disc=disc;var total=Math.max(0,saleSub-disc);var commVal=calcCommForCart(NV.cart,0);var btnFinalizar=document.getElementById('nv-btn-confirmar');if(btnFinalizar)btnFinalizar.disabled=true;_criarPedidoRpc('direto',null,disc,NV.obs||'').then(function(res){if(res.error){if(btnFinalizar)btnFinalizar.disabled=false;busyUnlock('nvFinalizar');toast('Erro ao confirmar pedido: '+(res.error.message||'erro desconhecido'),'err');return;}var novoId=res.data&&res.data.numero;var novoTotal=(res.data&&res.data.total!=null)?res.data.total:total;loadPedidosFromSb().then(function(){try{var _novoPed=null;var _all=getPeds(true);for(var _pj=0;_pj<_all.length;_pj++){if(_all[_pj].id===novoId){_novoPed=_all[_pj];break;}}if(_novoPed)estBaixaPedido(_novoPed);}catch(e){console.warn('[Fluxy] estBaixa:',e);}logHist('Pedido confirmado',novoId+' · '+NV.cliNome+' · '+fmt(novoTotal)+' · comissão: '+fmt(commVal)+(NV.obs?' · '+NV.obs:''));toast('✅ Pedido '+novoId+' aprovado! Comissão: '+fmt(commVal));NV={step:1,cliId:null,cliNome:'',cart:[],disc:0,pag:'Dinheiro',obs:'',commType:'pct',commPct:0,commMeta:0,solicitarNF:false};if(btnFinalizar)btnFinalizar.disabled=false;go('pedidos');busyUnlock('nvFinalizar');});}).catch(function(e){if(btnFinalizar)btnFinalizar.disabled=false;busyUnlock('nvFinalizar');toast('Erro ao confirmar pedido: '+(e&&e.message?e.message:'falha de rede'),'err');});}
+var _nvPendingReq={direto:null,gerente:null};function _criarPedidoRpc(modo,gerenteDestinoId,desconto,observacoes){var itens=[];for(var _ii=0;_ii<NV.cart.length;_ii++){var _it=NV.cart[_ii];itens.push({produto_id:_it.pId,quantidade:_it.qty,preco_unitario:_it.preco});}var reqKey=(modo==='gerente')?'gerente':'direto';if(!_nvPendingReq[reqKey])_nvPendingReq[reqKey]=crypto.randomUUID();return _sb.rpc('criar_pedido',{p_request_id:_nvPendingReq[reqKey],p_modo:modo,p_cliente_id:NV.cliId,p_itens:itens,p_desconto:desconto||0,p_observacoes:observacoes||'',p_pagamento:NV.pag||'Dinheiro',p_solicitar_nf:NV.solicitarNF||false,p_gerente_destino_id:gerenteDestinoId||null}).then(function(res){if(!res.error)_nvPendingReq[reqKey]=null;return res;});}function nvFinalizar(){if(!SESS||!SESS.userId){toast('Sessão expirada. Faça login novamente.','err');return;}if(!navigator.onLine){toast('Sem conexão com a internet. Para garantir a segurança e evitar conflitos entre vendedores, conecte-se à internet antes de finalizar o pedido.','err');return;}if(!busyLock('nvFinalizar'))return;if(!NV.cliId||!NV.cart.length)return;var inputs=document.querySelectorAll('[data-pid]');for(var fi=0;fi<inputs.length;fi++){var fel=inputs[fi];var fpId=fel.getAttribute('data-pid');var fval=parseFloat(fel.value)||0;if(fpId&&fval>0)nvEditPreco(fpId,fval);}var pags=document.getElementById('nv-pag');if(pags)NV.pag=pags.value;var discEl=document.getElementById('nv-disc');var rawDisc=discEl?parseFloat(discEl.value)||0:NV.disc||0;var obsEl=document.getElementById('nv-obs');if(obsEl)NV.obs=obsEl.value||'';var nfEl=document.getElementById('nv-solicitar-nf');if(nfEl)NV.solicitarNF=nfEl.checked;var saleSub=0;for(var i=0;i<NV.cart.length;i++)saleSub+=NV.cart[i].preco*NV.cart[i].qty;var maxDisc=Math.floor(saleSub*0.8*100)/100;var disc=Math.min(rawDisc,maxDisc);NV.disc=disc;var total=Math.max(0,saleSub-disc);var commVal=null;var btnFinalizar=document.getElementById('nv-btn-confirmar');if(btnFinalizar)btnFinalizar.disabled=true;_criarPedidoRpc('direto',null,disc,NV.obs||'').then(function(res){if(res.error){if(btnFinalizar)btnFinalizar.disabled=false;busyUnlock('nvFinalizar');toast('Erro ao confirmar pedido: '+(res.error.message||'erro desconhecido'),'err');return;}var novoId=res.data&&res.data.numero;var novoTotal=(res.data&&res.data.total!=null)?res.data.total:total;var novoComm=(res.data&&res.data.comissao!=null)?Number(res.data.comissao):null;loadPedidosFromSb().then(function(){try{var _novoPed=null;var _all=getPeds(true);for(var _pj=0;_pj<_all.length;_pj++){if(_all[_pj].id===novoId){_novoPed=_all[_pj];break;}}if(_novoPed)estBaixaPedido(_novoPed);}catch(e){console.warn('[Fluxy] estBaixa:',e);}var _commMsg=novoComm==null?'—':fmt(novoComm);logHist('Pedido confirmado',novoId+' · '+NV.cliNome+' · '+fmt(novoTotal)+' · comissão: '+_commMsg+(NV.obs?' · '+NV.obs:''));toast('✅ Pedido '+novoId+' aprovado! Comissão: '+_commMsg);NV={step:1,cliId:null,cliNome:'',cart:[],disc:0,pag:'Dinheiro',obs:'',commType:'pct',commPct:0,commMeta:0,solicitarNF:false};if(btnFinalizar)btnFinalizar.disabled=false;go('pedidos');busyUnlock('nvFinalizar');});}).catch(function(e){if(btnFinalizar)btnFinalizar.disabled=false;busyUnlock('nvFinalizar');toast('Erro ao confirmar pedido: '+(e&&e.message?e.message:'falha de rede'),'err');});}
 
 // ════════��══════════════════════════════════════════════════
 // PEDIDOS
@@ -9452,11 +9452,12 @@ function nvResumoHtml(saleSub,disc,commVal){
     +'<span class="t0">Total do Pedido</span>'
     +'<span class="mono" style="color:var(--green);font-size:18px">'+fmt(total)+'</span>'
     +'</div>';
+  var commDisplay=commVal==null?'Calculada pelo servidor':fmt(commVal);
   html+='<div class="row-between fs12 fw7">'
-    +'<span class="t2">Comissão estimada</span>'
-    +'<span class="mono" style="color:var(--purple);font-size:14px">'+fmt(commVal)+'</span>'
+    +'<span class="t2">Comissão oficial</span>'
+    +'<span class="mono" style="color:var(--purple);font-size:14px">'+commDisplay+'</span>'
     +'</div>';
-  if(commVal>0){
+  if(commVal!=null&&commVal>0){
     html+='<div class="fs10 t3 mt4" style="padding:5px 8px;background:var(--purpleg,rgba(139,92,246,.1));border-radius:6px">'
       +'💜 Inclui ganho por caixa e/ou '+' comissão %'
     +'</div>';
@@ -9473,7 +9474,7 @@ function nvUpdateFinalPreview(){
   var disc=Math.min(raw,maxDisc);
   if(discEl&&disc<raw){ discEl.value=disc; }
   NV.disc=disc;
-  var commVal=calcCommForCart(NV.cart,disc);
+  var commVal=null;
   var resumo=document.getElementById('nv-resumo');
   if(resumo) resumo.innerHTML=nvResumoHtml(saleSub,disc,commVal);
   var preview=document.getElementById('nv-comm-preview');
@@ -10217,7 +10218,7 @@ function nvEnviarGerente(){
   var disc=Math.min(rawDisc,maxDisc);
   NV.disc=disc;
   var total=Math.max(0,saleSub-disc);
-  var commVal=calcCommForCart(NV.cart,0);
+  var commVal=null;
   // Build gerente options
   var opts='';
   for(var i=0;i<gerentes.length;i++) opts+='<option value="'+gerentes[i].id+'">'+gerentes[i].nome+'</option>';
@@ -13602,13 +13603,13 @@ function epUpdateTotal(){
   if(rawDisc>maxDisc&&discEl) discEl.value=maxDisc.toFixed(2);
   var disc=Math.min(rawDisc,maxDisc);
   var total=Math.max(0,saleSub-disc);
-  var comm=calcCommForCart(itens,0);
+  var comm=null;
   var sum=document.getElementById('ep-summary');
   if(!sum) return;
   sum.innerHTML='<div class="row-between fs12 mb4"><span class="t2">Subtotal ('+itens.length+' produto'+(itens.length!==1?'s':'')+')</span><span class="mono">'+fmt(saleSub)+'</span></div>'
     +(disc>0?'<div class="row-between fs12 mb4 red"><span>Desconto</span><span class="mono">− '+fmt(disc)+'</span></div>':'')
     +'<div class="row-between fw8 mb4"><span>Total Final</span><span class="mono" style="color:var(--green);font-size:15px">'+fmt(total)+'</span></div>'
-    +'<div class="row-between fs11"><span class="t3">Comissão estimada</span><span class="mono" style="color:var(--purple)">'+fmt(comm)+'</span></div>';
+    +'<div class="row-between fs11"><span class="t3">Comissão oficial</span><span class="mono" style="color:var(--purple)">'+(comm==null?'Recalculada ao salvar/aprovar':fmt(comm))+'</span></div>';
 }
 
 async function saveEditPedFull(){
