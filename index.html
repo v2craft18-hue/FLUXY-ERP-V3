@@ -6237,7 +6237,45 @@ function openProdModal(editId){
   var prods=getProds();
   var p=null;
   if(editId){ for(var i=0;i<prods.length;i++) if(prods[i].id===editId){p=prods[i];break;} }
-  var ct=(p&&p.commType)||'pct';
+  var officialType=p?p.officialCommType:null;
+  var officialPct=p?p.officialCommPct:null;
+  var officialMeta=p?p.officialCommMeta:null;
+  var officialBase=p?p.officialPrecoBaseComissao:null;
+  var officialUpdatedAt=p?p.officialCommAtualizadoEm:null;
+  var officialUpdatedBy=p?p.officialCommAtualizadoPor:null;
+  var officialCommHtml='';
+  if(!p){
+    officialCommHtml='<div style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);padding:14px;margin-top:10px">'
+      +'<div class="card-title" style="margin-bottom:10px">💰 REGRA OFICIAL DE COMISSÃO</div>'
+      +'<div class="fs12 t3">Salve o produto primeiro para configurar a comissão oficial.</div>'
+      +'</div>';
+  } else {
+    var officialTypeLabel=officialType==='pct'?'Percentual':(officialType==='caixa'?'Caixa':'Não configurada');
+    officialCommHtml='<div style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);padding:14px;margin-top:10px">'
+      +'<div class="card-title" style="margin-bottom:12px">💰 REGRA OFICIAL DE COMISSÃO</div>'
+      +'<div class="field" style="margin-bottom:10px"><label>TIPO</label><div class="fs13 fw7">'+sanitize(officialTypeLabel)+'</div></div>';
+    if(officialType==='pct'){
+      var officialPctTxt=officialPct==null?'—':String(officialPct).replace('.',',')+'%';
+      officialCommHtml+='<div class="field" style="margin-bottom:10px"><label>PERCENTUAL</label><div class="fs13 fw7">'+sanitize(officialPctTxt)+'</div></div>';
+    } else if(officialType==='caixa'){
+      var officialMetaTxt=officialMeta==null?'—':fmt(officialMeta);
+      var officialBaseTxt=officialBase==null?'—':fmt(officialBase);
+      officialCommHtml+='<div class="field" style="margin-bottom:10px"><label>FIXO POR CAIXA</label><div class="fs13 fw7">'+sanitize(officialMetaTxt)+'</div></div>'
+        +'<div class="field" style="margin-bottom:10px"><label>PREÇO-BASE</label><div class="fs13 fw7">'+sanitize(officialBaseTxt)+'</div></div>';
+    } else {
+      officialCommHtml+='<div class="fs12 t3" style="margin-bottom:10px">Comissão oficial ainda não configurada</div>';
+    }
+    if(officialUpdatedAt||officialUpdatedBy){
+      var officialAudit=[];
+      if(officialUpdatedAt){
+        var officialDate=new Date(officialUpdatedAt);
+        officialAudit.push('Última alteração: '+(isNaN(officialDate.getTime())?String(officialUpdatedAt):officialDate.toLocaleString('pt-BR')));
+      }
+      if(officialUpdatedBy) officialAudit.push('Por: '+String(officialUpdatedBy));
+      officialCommHtml+='<div class="fs11 t3" style="padding-top:8px;border-top:1px solid var(--b1)">'+sanitize(officialAudit.join(' · '))+'</div>';
+    }
+    officialCommHtml+='</div>';
+  }
   var defBarcode=p&&p.codigoBarras?p.codigoBarras:genBarcode();
   var defSku=p&&p.sku?p.sku:(p?genSKU(p.nome):genSKU(''));
   var html='<div class="modal-title">'+(p?'✏️ Editar':'➕ Novo')+' Produto</div>'
@@ -6287,25 +6325,7 @@ function openProdModal(editId){
         +'<div class="field"><label>ALÍQUOTA ICMS (%)</label><input id="pp-icms" type="number" value="'+(p?p.icms||0:0)+'" placeholder="0"></div>'
       +'</div>'
     +'</div>'
-    // Commission section
-    +'<div style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);padding:14px;margin-top:10px">'
-      +'<div class="card-title" style="margin-bottom:12px">💰 REGRA DE COMISSÃO</div>'
-      +'<div class="field" style="margin-bottom:12px"><label>TIPO DE GANHO</label>'
-        +'<select id="pp-comm-type" onchange="prodModalToggleComm()">'
-          +'<option value="pct"'+(ct==='pct'?' selected':'')+'>% Porcentagem</option>'
-          +'<option value="caixa"'+(ct==='caixa'?' selected':'')+'>Caixa / Meta</option>'
-        +'</select>'
-      +'</div>'
-      +'<div id="pp-comm-pct-wrap" class="field" style="margin-bottom:0;display:'+(ct!=='caixa'?'block':'none')+'">'
-        +'<label>PORCENTAGEM (%)</label>'
-        +'<input id="pp-comm-pct" type="number" value="'+(p&&p.commPct!=null?p.commPct:6.3)+'" min="0" max="100" step="0.1" placeholder="6.3">'
-      +'</div>'
-      +'<div id="pp-comm-meta-wrap" class="field" style="margin-bottom:0;display:'+(ct==='caixa'?'block':'none')+'">'
-        +'<label>COMISSÃO FIXA POR UNIDADE (R$)</label>'
-        +'<input id="pp-comm-meta" type="number" value="'+(p&&p.commMeta!=null?p.commMeta:0)+'" min="0" placeholder="5">'
-        +'<div class="fs11 t3 mt4">Vendedor ganha este valor fixo + lucro acima do preço base</div>'
-      +'</div>'
-    +'</div>'
+    +officialCommHtml
     +'<div id="pp-err" class="alert err"></div>'
     +'<div class="modal-foot">'
       +'<button class="btn btn-g" onclick="closeModal()">Cancelar</button>'
@@ -6322,12 +6342,6 @@ function saveProd(editId){
   if(!err){ console.error('[saveProd] pp-err not found'); return; }
   if(!nome){err.textContent='Nome obrigatório.';err.style.display='block';return;}
   if(!preco){err.textContent='Preço obrigatório.';err.style.display='block';return;}
-  var ctEl=document.getElementById('pp-comm-type');
-  var pctEl=document.getElementById('pp-comm-pct');
-  var metaEl=document.getElementById('pp-comm-meta');
-  var commType=ctEl?ctEl.value:'pct';
-  var commPct=pctEl?(parseFloat(pctEl.value)||6.3):6.3;
-  var commMeta=metaEl?(parseFloat(metaEl.value)||0):0;
   var barcodeEl=document.getElementById('pp-barcode');
   var skuEl=document.getElementById('pp-sku');
   var barcode=(barcodeEl?barcodeEl.value:'')||genBarcode();
@@ -6350,13 +6364,22 @@ function saveProd(editId){
     estMin:parseInt((document.getElementById('pp-estmin')||{value:0}).value)||0,
     estReservado:p?p.estReservado||0:0,
     ativo:true,
-    commType:commType, commPct:commPct, commMeta:commMeta,
     codigoBarras:barcode.trim(), sku:sku.trim(),
     ncm:(document.getElementById('pp-ncm')||{value:''}).value||'',
     cfop:(document.getElementById('pp-cfop')||{value:'5102'}).value||'5102',
     cst:(document.getElementById('pp-cst')||{value:'102'}).value||'102',
     icms:parseFloat((document.getElementById('pp-icms')||{value:0}).value)||0
   };
+  // M1B-B1.2: salvar dados gerais não pode inventar nem apagar comissão.
+  // Preserva campos legados existentes e os campos oficiais apenas no cache local;
+  // _prodToSb continua sendo a whitelist que NÃO grava comissão oficial no banco.
+  if(p){
+    var _commKeep=['commType','commPct','commMeta','officialCommType','officialCommPct','officialCommMeta','officialPrecoBaseComissao','officialCommAtualizadoEm','officialCommAtualizadoPor'];
+    for(var _ck=0;_ck<_commKeep.length;_ck++){
+      var _key=_commKeep[_ck];
+      if(Object.prototype.hasOwnProperty.call(p,_key)) obj[_key]=p[_key];
+    }
+  }
   if(editId){
     for(var i=0;i<prods.length;i++) if(prods[i].id===editId){obj.id=editId;prods[i]=obj;break;}
   } else {
