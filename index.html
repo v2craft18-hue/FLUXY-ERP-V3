@@ -2827,6 +2827,7 @@ async function hydrateAllFromSb(){
     await loadClisFromSb();
     await loadProdsFromSb();
     await loadPedidosFromSb();
+    await loadRotasFromSb();
     console.log('[Fluxy] Hidratação Supabase concluída');
   } catch(e){
     console.error('[Fluxy] hydrateAllFromSb falhou (cache preservado):', e.message);
@@ -4416,6 +4417,9 @@ function syncCloud(key, data){
         if(APP_STATE.migration_state.cobr || stor_get(KEYS.cobr) && stor_get(KEYS.cobr).length > 0) {
           loadCobrFromSb();
         }
+        break;
+      case 'rotas':
+        loadRotasFromSb();
         break;
       case 'usuarios':
         if(APP_STATE.migration_state.usuarios || stor_get(KEYS.users) && stor_get(KEYS.users).length > 0) {
@@ -12232,31 +12236,101 @@ function _rotaToSb(rotaObj){
     status:        rotaObj.status || 'aberta',
     data:          rotaObj.data || new Date().toISOString().slice(0,10),
     obs:           rotaObj.obs || '',
-    ped_ids:       JSON.stringify(rotaObj.pedIds || []),
-    criado_em:     rotaObj.criadoEm || new Date().toISOString()
+    ped_ids:       rotaObj.pedIds || [],
+    deleted:       !!rotaObj.deleted,
+    criado_por:    isValidUUID(rotaObj.criadoPor) ? rotaObj.criadoPor : null,
+    criado_em:     rotaObj.criadoEm || new Date().toISOString(),
+    updated_at:    rotaObj.updatedAt || new Date().toISOString()
   };
 }
 
-async function _rotaFromSb(row){
+function _rotaFromSb(row){
   // Converte linha Supabase (snake_case) → formato local (camelCase)
   if(!row) return null;
   return {
-    id:            row.numero || '',
+    id:            row.numero || '', _sbId: row.id || '',
     nome:          row.nome || '',
     entregadorId:  row.entregador_id || '',
     status:        row.status || 'aberta',
     data:          row.data || new Date().toISOString().slice(0,10),
     obs:           row.obs || '',
-    pedIds:        row.ped_ids ? JSON.parse(row.ped_ids) : [],
+    pedIds:        Array.isArray(row.ped_ids) ? row.ped_ids :
+                   (row.ped_ids ? JSON.parse(row.ped_ids) : []),
     deleted:       row.deleted || false,
-    criadoEm:      row.criado_em
+    criadoEm:      row.criado_em,
+    updatedAt:     row.updated_at || row.criado_em
   };
 }
 
-// Rotas functions disabled - table doesn't exist in current schema
-// async function loadRotasFromSb(){ }
-// async function _rotaUpsertSb(rotaObj){ }
-// async function _rotaDeleteSb(id){ }
+async function loadRotasFromSb(){
+  if(!CLOUD_ENABLED||!_sb||!SESS||!isValidUUID(SESS.empresaId)) return;
+  if(!(await _hasSupabaseSession())){
+    console.log('[Fluxy/ROTA] Sessão Supabase indisponível — mantém cache local');
+    return;
+  }
+  try{
+    var res=await _sb.from('rotas').select('*')
+      .eq('empresa_id',SESS.empresaId).eq('deleted',false)
+      .order('data',{ascending:true}).order('criado_em',{ascending:true});
+    if(res.error){
+      console.error('[Fluxy/ROTA] erro ao carregar:',res.error.message);
+      return;
+    }
+    var rows=res.data||[]; var rotas=[];
+    for(var i=0;i<rows.length;i++) rotas.push(_rotaFromSb(rows[i]));
+    stor_set(KEYS.rotas,rotas);
+    console.log('[Fluxy/ROTA] '+rotas.length+' rotas carregadas do Supabase');
+    if(currentView==='rotas') safeRender('rotas',renderRotasMgmt);
+  }catch(e){
+    console.error('[Fluxy/ROTA] loadRotasFromSb:',e.message);
+  }
+}
+
+async function _rotaUpsertSb(rotaObj){
+  if(!CLOUD_ENABLED||!_sb||!SESS||!isValidUUID(SESS.empresaId)) return null;
+  if(!navigator.onLine){
+    toast('Rota salva neste aparelho. Conecte-se à internet para sincronizar.','warning');
+    return null;
+  }
+  var record=_rotaToSb(rotaObj);
+  if(!record) return null;
+  record.ped_ids=rotaObj.pedIds||[];
+  record.deleted=!!rotaObj.deleted;
+  record.updated_at=new Date().toISOString();
+  record.criado_por=isValidUUID(rotaObj.criadoPor)?rotaObj.criadoPor:null;
+  var res=await _sb.from('rotas').upsert([record],{
+    onConflict:'empresa_id,numero'
+  }).select().single();
+  if(res.error){
+    toast('Não foi possível sincronizar a rota: '+res.error.message,'err');
+    throw res.error;
+  }
+  if(res.data){
+    rotaObj._sbId=res.data.id;
+    var rs=getRotas();
+    for(var i=0;i<rs.length;i++) if(rs[i].id===rotaObj.id){
+      rs[i]._sbId=res.data.id; break;
+    }
+    saveRotas(rs);
+  }
+  return res.data;
+}
+
+async function _rotaDeleteSb(numero){
+  if(!CLOUD_ENABLED||!_sb||!SESS||!isValidUUID(SESS.empresaId)) return null;
+  if(!navigator.onLine){
+    toast('Exclusão salva neste aparelho. Conecte-se para sincronizar.','warning');
+    return null;
+  }
+  var res=await _sb.from('rotas').update({
+    deleted:true,updated_at:new Date().toISOString()
+  }).eq('empresa_id',SESS.empresaId).eq('numero',numero).select('id').maybeSingle();
+  if(res.error){
+    toast('Não foi possível sincronizar a exclusão da rota.','err');
+    throw res.error;
+  }
+  return res.data;
+}
 
 // ── Supabase: Migração Automática de Dados (Etapa 9) ───────────────
 // Migra dados locais para Supabase mantendo cache como contingência
@@ -12278,6 +12352,7 @@ async function migrateDataToSb(){
     { key: 'prods', table: 'produtos', name: 'Produtos', converter: _prodToSb },
     { key: 'peds', table: 'pedidos', name: 'Pedidos', converter: _pedidoToSb, onConflict: 'empresa_id,numero' },
     { key: 'cobr', table: 'cobracas', name: 'Cobranças', converter: _cobrToSb },
+    { key: 'rotas', table: 'rotas', name: 'Rotas', converter: _rotaToSb, onConflict: 'empresa_id,numero' },
     { key: 'usuarios', table: 'usuarios', name: 'Usuários', converter: _usuarioToSb }
   ];
   
