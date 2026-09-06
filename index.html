@@ -13874,6 +13874,12 @@ if(SESS){
 // ══��════════════════════════════════════════════════════════════
 var _pwaPrompt=null;
 var _pwaWorker=null;
+var _pwaReloading=false;
+
+function pwaShowUpdateBar(){
+  var bar=document.getElementById('pwa-update-bar');
+  if(bar) bar.style.display='block';
+}
 
 // ── Register Service Worker ──────────────────────────────────────
 function pwaRegister(){
@@ -13888,6 +13894,9 @@ function pwaRegister(){
   navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'})
     .then(function(reg){
       _pwaWorker=reg;
+      // The worker may already be waiting before this page registers its
+      // updatefound listener (for example after reopening an installed PWA).
+      if(reg.waiting&&navigator.serviceWorker.controller) pwaShowUpdateBar();
       // Check for updates every 30 min
       if(window._swUpdateInterval) clearInterval(window._swUpdateInterval);
     window._swUpdateInterval=setInterval(function(){try{reg.update();}catch(e){}},30*60*1000);
@@ -13897,8 +13906,7 @@ function pwaRegister(){
         if(!newSW) return;
         newSW.addEventListener('statechange',function(){
           if(newSW.state==='installed'&&navigator.serviceWorker.controller){
-            var bar=document.getElementById('pwa-update-bar');
-            if(bar) bar.style.display='block';
+            pwaShowUpdateBar();
           }
         });
       });
@@ -13907,6 +13915,8 @@ function pwaRegister(){
 
   // Page controlled by SW — refresh after update
   navigator.serviceWorker.addEventListener('controllerchange',function(){
+    if(_pwaReloading) return;
+    _pwaReloading=true;
     window.location.reload();
   });
 }

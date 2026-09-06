@@ -1,11 +1,11 @@
 // ══════════════════════════════════════════════════════════════════
-// Fluxy ERP — Service Worker v2.0
+// Fluxy ERP — Service Worker v2.1
 // Strategy: Network-first for app shell (always latest app code),
 //           cache fallback only when offline.
 // Updates stay waiting until the user confirms via the app update bar.
 // ══════════════════════════════════════════════════════════════════
 
-var CACHE_VERSION    = '2.0';
+var CACHE_VERSION    = '2.1';
 var CACHE_NAME       = 'fluxy-v' + CACHE_VERSION;
 var CACHE_OLD_PREFIX = 'fluxy-v';
 
@@ -13,7 +13,10 @@ var CACHE_OLD_PREFIX = 'fluxy-v';
 // Do not pre-cache sw.js itself; the browser owns the service-worker update flow.
 var SHELL_ASSETS = [
   './index.html',
+  './config.js',
   './manifest.json',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
 ];
 
 // ── Install: pre-cache shell ──────────────────────────────────────
