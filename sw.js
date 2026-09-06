@@ -1,11 +1,11 @@
 // ══════════════════════════════════════════════════════════════════
-// Fluxy ERP — Service Worker v2.1
+// Fluxy ERP — Service Worker v2.2
 // Strategy: Network-first for app shell (always latest app code),
 //           cache fallback only when offline.
 // Updates stay waiting until the user confirms via the app update bar.
 // ══════════════════════════════════════════════════════════════════
 
-var CACHE_VERSION    = '2.1';
+var CACHE_VERSION    = '2.2';
 var CACHE_NAME       = 'fluxy-v' + CACHE_VERSION;
 var CACHE_OLD_PREFIX = 'fluxy-v';
 
@@ -69,10 +69,14 @@ self.addEventListener('fetch', function(e){
     // NETWORK-FIRST: always try latest version; cache only as offline fallback.
     e.respondWith(
       fetch(e.request).then(function(response){
-        if(response && response.status === 200){
-          var copy = response.clone();
-          caches.open(CACHE_NAME).then(function(cache){ cache.put(e.request, copy); });
-        }
+        // A server error must not replace a previously working app shell.
+        if(!response || !response.ok) throw new Error('App shell HTTP '+(response&&response.status));
+        var copy = response.clone();
+        caches.open(CACHE_NAME).then(function(cache){
+          // Keep one canonical navigation fallback instead of one entry per
+          // query string (?pwa=1, ?goto=pedidos, etc.).
+          cache.put(isNavigation ? './index.html' : e.request, copy);
+        });
         return response;
       }).catch(function(){
         return caches.match(e.request).then(function(cached){

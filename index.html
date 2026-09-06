@@ -13965,6 +13965,15 @@ var _pwaPrompt=null;
 var _pwaWorker=null;
 var _pwaReloading=false;
 
+function pwaWasDismissedRecently(){
+  try{
+    var d=parseInt(localStorage.getItem(window.fluxyKey('fluxi_pwa_dismissed'))||'0');
+    return d>0&&Date.now()-d<86400000;
+  }catch(e){
+    return false;
+  }
+}
+
 function pwaShowUpdateBar(){
   var bar=document.getElementById('pwa-update-bar');
   if(bar) bar.style.display='block';
@@ -14024,7 +14033,7 @@ window.addEventListener('beforeinstallprompt',function(e){
   _pwaPrompt=e;
   // Show banner after 3s if not already installed
   setTimeout(function(){
-    if(!pwaIsInstalled()){
+    if(!pwaIsInstalled()&&!pwaWasDismissedRecently()){
       var banner=document.getElementById('pwa-banner');
       if(banner) banner.style.display='block';
     }
@@ -14045,6 +14054,7 @@ function pwaInstall(){
       toast('✅ Fluxy ERP instalado!','ok');
       var banner=document.getElementById('pwa-banner');
       if(banner) banner.style.display='none';
+      try{ localStorage.removeItem(window.fluxyKey('fluxi_pwa_dismissed')); }catch(e){}
     }
     _pwaPrompt=null;
   });
@@ -14061,20 +14071,16 @@ document.addEventListener('DOMContentLoaded',function(){
     // Don't show again for 24h
     try{ localStorage.setItem(window.fluxyKey('fluxi_pwa_dismissed'),Date.now().toString()); }catch(e){}
   };
-  // Check if was dismissed recently
-  try{
-    var d=parseInt(localStorage.getItem(window.fluxyKey('fluxi_pwa_dismissed'))||'0');
-    if(Date.now()-d<86400000){
-      var banner=document.getElementById('pwa-banner');
-      if(banner) banner.style.display='none';
-      // Override — will still show if beforeinstallprompt fires
-    }
-  }catch(e){}
+  if(pwaWasDismissedRecently()){
+    var banner=document.getElementById('pwa-banner');
+    if(banner) banner.style.display='none';
+  }
 });
 
 // ── Installed event ────────────────────────────────────────��────
 window.addEventListener('appinstalled',function(){
   _pwaPrompt=null;
+  try{ localStorage.removeItem(window.fluxyKey('fluxi_pwa_dismissed')); }catch(e){}
   var banner=document.getElementById('pwa-banner');
   if(banner) banner.style.display='none';
   toast('🎉 Fluxy ERP instalado com sucesso!','ok');
