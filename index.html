@@ -2566,6 +2566,10 @@ function _pedidoFromSb(row){
     nfSolicitadaPor:row.nf_solicitada_por || '',
     nfEmitidaEm:    row.nf_emitida_em || null,
     nfEmitidaPor:   row.nf_emitida_por || '',
+    nfAutorizadaEm: row.nf_autorizada_em || null,
+    nfRejeitadaEm:  row.nf_rejeitada_em || null,
+    nfCanceladaEm:  row.nf_cancelada_em || null,
+    nfStatusAtualizadoPor: row.nf_status_atualizado_por || '',
     commVal:        row.comissao == null ? null : Number(row.comissao),
     criadoEm:       row.criado_em,
     // CORREÇÃO FRONTEND 02: versão real do banco (optimistic concurrency) e
@@ -9907,7 +9911,7 @@ function renderNotas(){
       bw.appendChild(emBtn);
     }
     // Update status (admin)
-    if(nfSt==='emitida'){
+    if(nfSt==='emitida'||nfSt==='gerada'){
       var authBtn=document.createElement('button');
       authBtn.className='btn btn-gr btn-sm';
       authBtn.innerHTML='✅ Marcar Autorizada';
@@ -9950,18 +9954,30 @@ function renderNotas(){
   }
 }
 
-function setNfStatus(pedId, status){
+async function setNfStatus(pedId, status){
   if(!isAdm()) return;
   var peds=getPeds();
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===pedId){
-      peds[i].nfStatus=status;
-      if(status==='autorizada') peds[i].nfAutorizadaEm=new Date().toISOString();
-      if(status==='cancelada')  peds[i].nfCanceladaEm=new Date().toISOString();
-      break;
-    }
+  var p=null;
+  for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){p=peds[i];break;}
+  if(!p||!p._sbId||p.versao==null){
+    toast('Pedido sem vínculo válido com o servidor. Atualize os dados e tente novamente.','err');
+    return;
   }
-  savePeds(peds);
+  if(!CLOUD_ENABLED||!_sb||!navigator.onLine){
+    toast('A atualização da NF precisa de conexão com o servidor.','err');
+    return;
+  }
+  var result=await _lifecycleRpc({
+    busyKey:'nfStatus:'+pedId,
+    action:'nfStatus:'+status,
+    pedidoId:p._sbId,
+    rpcName:'atualizar_nf_status_pedido',
+    args:{
+      p_pedido_id:p._sbId,p_versao:p.versao,
+      p_nf_status:status,p_motivo:null
+    }
+  });
+  if(!result.ok) return;
   logHist('NF '+status, pedId);
   safeRender('notas',renderNotas);
   toast(status==='autorizada'?'✅ NF autorizada!':status==='rejeitada'?'❌ NF rejeitada.':'NF '+status+'.');
