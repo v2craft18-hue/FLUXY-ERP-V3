@@ -2587,7 +2587,16 @@ function _pedidoFromSb(row){
     deletedBy:          row.deleted_by || null,
     deletedMotivo:      row.deleted_motivo || null,
     editadoEm:          row.editado_em || null,
-    editadoPor:         row.editado_por || null
+    editadoPor:         row.editado_por || null,
+    entregaStatus:      row.entrega_status || 'pendente',
+    horaEntrega:        row.entrega_em || null,
+    entregadorId:       row.entregador_id || null,
+    entregadorNome:     row.entregador_nome || null,
+    pagamentoEntrega:   row.pagamento_entrega || null,
+    naoEntregueMotivo:  row.nao_entregue_motivo || null,
+    naoEntregueObs:     row.nao_entregue_obs || null,
+    naoEntregueEm:      row.nao_entregue_em || null,
+    naoEntregueBy:      row.nao_entregue_por || null
   };
 }
 
@@ -8261,10 +8270,7 @@ function _renderEntregaCard(p, inp, res){
     retryBtn.innerHTML='🔄 Tentar Novamente';
     retryBtn.onclick=(function(pid,inputEl,resEl){
       return function(){
-        var peds2=getPeds();
-        for(var ii=0;ii<peds2.length;ii++) if(peds2[ii].id===pid){delete peds2[ii].pagamentoEntrega;break;}
-        savePeds(peds2);
-        _renderEntregaCard({id:pid},inputEl,resEl);
+        _doEnSetStatus(pid,'pendente');
       };
     })(p.id,inp,res);
     bw.appendChild(retryBtn);
@@ -8302,22 +8308,12 @@ function confirmarNaoEntregue(pedId, inputEl, resEl){
   openModal(html);
 }
 
-function confirmarNaoEntregueOk(){
+async function confirmarNaoEntregueOk(){
   var pedId=_FLUXI_UI.ne.pedId;
   var motivo=(document.getElementById('ne-motivo')||{value:'outro'}).value;
   var obs=(document.getElementById('ne-obs')||{value:''}).value||'';
-  var peds=getPeds();
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===pedId){
-      peds[i].pagamentoEntrega='nao_entregue';
-      peds[i].naoEntregueMotivo=motivo;
-      peds[i].naoEntregueObs=obs;
-      peds[i].naoEntregueEm=new Date().toISOString();
-      if(SESS) peds[i].naoEntregueBy=SESS.nome||SESS.userId;
-      break;
-    }
-  }
-  savePeds(peds);
+  var result=await _deliveryLifecycle(pedId,'nao_entregue',null,motivo,obs);
+  if(!result.ok){ busyUnlock('naoEntregue'); return; }
   logHist('Entrega não realizada',pedId+(obs?' — '+obs:''));
   busyUnlock('naoEntregue');
   closeModal();
@@ -8504,38 +8500,48 @@ function enSetStatus(id, status){
   _doEnSetStatus(id, status);
 }
 
-function _doEnSetStatus(id, status){
+async function _deliveryLifecycle(id,status,pagamento,motivo,observacao){
   var peds=getPeds();
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===id){
-      peds[i].entregaStatus=status;
-      if(status==='entregue'){
-        peds[i].horaEntrega=new Date().toISOString();
-        if(!peds[i].entregadorId) peds[i].entregadorId=SESS.userId;
-        peds[i].entregadorNome=SESS.nome;
-      } else if(status==='em_rota'){
-        if(!peds[i].entregadorId) peds[i].entregadorId=SESS.userId;
-        peds[i].entregadorNome=SESS.nome;
-      } else {
-        peds[i].horaEntrega=null;
-      }
-      break;
-    }
+  var p=null;
+  for(var i=0;i<peds.length;i++) if(peds[i].id===id){p=peds[i];break;}
+  if(!p||!p._sbId||p.versao==null){
+    toast('Pedido sem vínculo válido com o servidor. Atualize os dados e tente novamente.','err');
+    return {ok:false,reason:'invalid'};
   }
-  savePeds(peds);
+  if(!CLOUD_ENABLED||!_sb||!navigator.onLine){
+    toast('A alteração da entrega precisa de conexão com o servidor.','err');
+    return {ok:false,reason:'offline'};
+  }
+  return _lifecycleRpc({
+    busyKey:'delivery:'+id,
+    action:'delivery:'+status,
+    pedidoId:p._sbId,
+    rpcName:'atualizar_entrega_pedido',
+    args:{
+      p_pedido_id:p._sbId,p_versao:p.versao,p_entrega_status:status,
+      p_pagamento_entrega:pagamento||null,p_motivo:motivo||null,
+      p_observacao:observacao||null
+    }
+  });
+}
+
+async function _doEnSetStatus(id, status){
+  var result=await _deliveryLifecycle(id,status,null,null,null);
+  if(!result.ok) return false;
   logHist('Entrega '+status, id+(status==='entregue'?' — confirmado por '+SESS.nome:''));
   if(typeof renderEntr==='function') renderEntr();
   if(typeof renderRotas==='function') renderRotas();
   toast(status==='entregue'?'✅ Entrega confirmada!':status==='em_rota'?'🚚 Saiu para entrega!':'↩ Status atualizado');
+  return true;
 }
 
-function confirmarEntregaPago(pedId){
+async function confirmarEntregaPago(pedId){
   closeModal();
-  _doEnSetStatus(pedId,'entregue');
-  // Mark no cobrança needed
-  var peds=getPeds();
-  for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){peds[i].pagamentoEntrega='pago_na_entrega';break;}
-  savePeds(peds);
+  var result=await _deliveryLifecycle(pedId,'entregue','pago_na_entrega',null,null);
+  if(!result.ok) return;
+  logHist('Entrega entregue',pedId+' — confirmado por '+SESS.nome);
+  if(typeof renderEntr==='function') renderEntr();
+  if(typeof renderRotas==='function') renderRotas();
   toast('✅ Entregue e pago!');
 }
 
@@ -8656,7 +8662,7 @@ function previewFoto(inp){
   reader.readAsDataURL(inp.files[0]);
 }
 
-function salvarCobranca(pedId){
+async function salvarCobranca(pedId){
   var peds=getPeds();
   var p=null;
   for(var i=0;i<peds.length;i++) if(peds[i].id===pedId){p=peds[i];break;}
@@ -8672,18 +8678,10 @@ function salvarCobranca(pedId){
 
   var obs=(document.getElementById('cobr-obs-inp')||{value:''}).value||'';
 
-  // Mark delivery as done + pending payment
-  for(var i=0;i<peds.length;i++){
-    if(peds[i].id===pedId){
-      peds[i].entregaStatus='entregue';
-      peds[i].horaEntrega=new Date().toISOString();
-      if(!peds[i].entregadorId) peds[i].entregadorId=SESS.userId;
-      peds[i].entregadorNome=SESS.nome;
-      peds[i].pagamentoEntrega='pendente_cobranca';
-      break;
-    }
-  }
-  savePeds(peds);
+  var deliveryResult=await _deliveryLifecycle(
+    pedId,'entregue','pendente_cobranca',null,obs
+  );
+  if(!deliveryResult.ok) return;
 
   // Create cobrança record
   var cobrs=getCobr();
