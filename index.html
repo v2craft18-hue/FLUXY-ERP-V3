@@ -726,6 +726,16 @@ tr:last-child td { border-bottom:none }
   .page-title { font-size: 18px }
   .kpi-value  { font-size: 22px }
   .kpi-card   { padding: 10px 12px 8px }
+  #dash-kpis  { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px }
+  #dash-kpis .kpi-card { min-width:0; overflow:hidden }
+  #dash-kpis .kpi-value {
+    font-size:clamp(17px,5.5vw,24px)!important;
+    line-height:1.05;
+    letter-spacing:-.5px;
+    white-space:normal;
+    overflow-wrap:anywhere;
+  }
+  #dash-kpis .kpi-sub { overflow-wrap:anywhere }
   .card       { padding: 12px; max-width: 100%; box-sizing: border-box;
                 word-break: break-word; overflow-wrap: break-word }
 
@@ -12067,6 +12077,127 @@ function openUserModal(editId){ if(!isAdm()&&!isGer()) return; editId=editId||nu
       +'<button class="btn btn-r" data-id="'+id+'" onclick="confirmDeleteUser(this.dataset.id)">🗑 Excluir definitivamente</button>'
     +'</div>');
   busyUnlock('deleteUser');
+}
+
+// User access v2: administrators define credentials directly; no recovery URL.
+function openUserModal(editId){
+  if(!isAdm()&&!isGer()) return;
+  editId=editId||null;
+  var users=getUsers(),u=null;
+  if(editId){ for(var i=0;i<users.length;i++) if(users[i].id===editId){u=users[i];break;} }
+  if(u&&!isAdm()&&(u.role==='adm'||u.role==='ger')){ toast('Sem permissão para editar este usuário.','err'); return; }
+  var curStatus=u?(u.status||(u.ativo===false?'bloqueado':'ativo')):'ativo';
+  var pwdFields=u?'':
+    '<div class="field"><label>SENHA *</label><input id="uu-pwd" type="password" minlength="6" maxlength="72" autocomplete="new-password" placeholder="Mínimo 6 caracteres"></div>'+
+    '<div class="field"><label>CONFIRMAR SENHA *</label><input id="uu-pwd2" type="password" minlength="6" maxlength="72" autocomplete="new-password" placeholder="Repita a senha"></div>';
+  var html='<div class="modal-title">'+(u?'✏️ Editar':'➕ Novo')+' Usuário</div>'+
+    '<div class="field"><label>NOME *</label><input id="uu-nome" value="'+sanitize(u?u.nome||'':'')+'" placeholder="Nome completo"></div>'+
+    '<div class="field"><label>E-MAIL *</label><input id="uu-email" type="email" value="'+sanitize(u?u.email||'':'')+'" placeholder="email@empresa.com"></div>'+
+    '<div class="field"><label>TELEFONE</label><input id="uu-tel" value="'+sanitize(u?u.telefone||'':'')+'" placeholder="(00) 00000-0000"></div>'+pwdFields+
+    '<div class="field"><label>TIPO</label><select id="uu-role">'+
+      (isAdm()?'<option value="ger"'+(u&&u.role==='ger'?' selected':'')+'>👔 Gerente</option>':'')+
+      '<option value="vend"'+(u&&u.role==='vend'?' selected':'')+'>Vendedor</option>'+
+      '<option value="entr"'+(u&&u.role==='entr'?' selected':'')+'>Entregador</option>'+
+      (isAdm()?'<option value="adm"'+(u&&u.role==='adm'?' selected':'')+'>Administrador</option>':'')+
+    '</select></div>'+
+    '<div class="field"><label>STATUS DE ACESSO</label><select id="uu-status">'+
+      '<option value="ativo"'+(curStatus==='ativo'?' selected':'')+'>✅ Ativo — acesso liberado</option>'+
+      '<option value="bloqueado"'+(curStatus==='bloqueado'?' selected':'')+'>🚫 Bloqueado — não consegue logar</option>'+
+      '<option value="desligado"'+(curStatus==='desligado'?' selected':'')+'>❌ Desligado — acesso removido</option>'+
+    '</select></div><div id="uu-err" class="alert err"></div><div class="modal-foot">'+
+    '<button class="btn btn-g" onclick="closeModal()">Cancelar</button>'+
+    '<button class="btn btn-p" data-id="'+(editId||'')+'" onclick="saveUser(this.dataset.id)">💾 '+(u?'Atualizar':'Cadastrar')+'</button></div>';
+  openModal(html);
+}
+
+async function saveUser(editId){
+  if(!requireAdmOrGer()||!busyLock('saveUser')) return;
+  editId=editId||null;
+  var nome=(document.getElementById('uu-nome').value||'').trim();
+  var email=(document.getElementById('uu-email').value||'').trim().toLowerCase();
+  var tel=document.getElementById('uu-tel').value||'';
+  var role=document.getElementById('uu-role').value;
+  var newStatus=(document.getElementById('uu-status')||{value:'ativo'}).value;
+  var err=document.getElementById('uu-err');
+  var senha=editId?'':((document.getElementById('uu-pwd')||{value:''}).value||'');
+  var senha2=editId?'':((document.getElementById('uu-pwd2')||{value:''}).value||'');
+  function fail(msg){ err.textContent=msg;err.style.display='block';busyUnlock('saveUser'); }
+  if(!nome){fail('Nome obrigatório.');return;}
+  if(!email||email.indexOf('@')<0){fail('E-mail inválido.');return;}
+  if(!editId&&senha.length<6){fail('A senha deve ter no mínimo 6 caracteres.');return;}
+  if(!editId&&senha.length>72){fail('A senha deve ter no máximo 72 caracteres.');return;}
+  if(!editId&&senha!==senha2){fail('As senhas não conferem.');return;}
+  if((role==='adm'||role==='ger'||role==='gerente')&&!isAdm()){fail('Somente administradores podem definir este papel.');return;}
+  var users=getUsers();
+  for(var i=0;i<users.length;i++) if(users[i].email===email&&users[i].id!==(editId||'')){fail('E-mail já cadastrado.');return;}
+  if(!editId){
+    if(!(CLOUD_ENABLED&&_sb)){fail('Sem conexão com o servidor. Verifique sua internet e tente novamente.');return;}
+    var btn=document.querySelector('.modal-foot .btn-p');
+    if(btn){btn.disabled=true;btn.textContent='⏳ Processando...';}
+    try{
+      var result=await _sb.functions.invoke('criar-usuario',{body:{acao:'criar',nome:nome,email:email,role:role,telefone:tel||null,senha:senha}});
+      var fnData=result.data,fnError=result.error;
+      if(fnError||(fnData&&fnData.error)){
+        err.textContent=_criarUsuarioErrMsg((fnData&&fnData.code)||'',(fnData&&fnData.error)||'Não foi possível cadastrar o usuário.');
+        err.style.display='block';if(btn){btn.disabled=false;btn.textContent='💾 Cadastrar';}busyUnlock('saveUser');return;
+      }
+      await loadUsuariosFromSb();
+      logHist('Cadastrou usuário',nome+' ('+roleLabel(role)+')');
+      closeModal();safeRender('usuarios',renderUsuarios);toast('✅ Usuário cadastrado e senha definida!','ok');
+    }catch(e){
+      console.error('[Fluxy/USU] erro ao criar usuário:',e);
+      err.textContent='Erro inesperado ao cadastrar usuário. Tente novamente.';err.style.display='block';
+      if(btn){btn.disabled=false;btn.textContent='💾 Cadastrar';}
+    }
+    busyUnlock('saveUser');return;
+  }
+  for(var j=0;j<users.length;j++) if(users[j].id===editId){
+    users[j].nome=nome;users[j].email=email;users[j].telefone=tel;users[j].role=role;
+    users[j].ativo=newStatus==='ativo';users[j].status=newStatus;break;
+  }
+  saveUsers(users);
+  if(CLOUD_ENABLED) await _usuarioUpsertSb(users.find(function(x){return x.id===editId;}));
+  logHist('Editou usuário',nome+' ('+roleLabel(role)+') status: '+newStatus);
+  closeModal();safeRender('usuarios',renderUsuarios);toast('✅ Usuário salvo!');busyUnlock('saveUser');
+}
+
+function resetPwd(id){
+  if(!requireAdmOrGer()) return;
+  var users=getUsers(),u=null;
+  for(var i=0;i<users.length;i++) if(users[i].id===id){u=users[i];break;}
+  if(u&&!isAdm()&&(u.role==='adm'||u.role==='ger')){toast('Sem permissão para redefinir a senha deste usuário.','err');return;}
+  openModal('<div class="modal-title">🔑 Redefinir Senha</div><div class="fs12 t2 mb12">Defina uma nova senha para <b>'+sanitize(u?u.nome:'')+'</b>.</div>'+
+    '<div class="field"><label>NOVA SENHA *</label><input id="rp-pwd" type="password" minlength="6" maxlength="72" autocomplete="new-password" placeholder="Mínimo 6 caracteres"></div>'+
+    '<div class="field"><label>CONFIRMAR SENHA *</label><input id="rp-pwd2" type="password" minlength="6" maxlength="72" autocomplete="new-password" placeholder="Repita a senha"></div>'+
+    '<div id="rp-err" class="alert err"></div><div class="modal-foot"><button class="btn btn-g" onclick="closeModal()">Cancelar</button>'+
+    '<button class="btn btn-p" onclick="doResetPwd(\''+id+'\')">💾 Salvar senha</button></div>');
+}
+
+async function doResetPwd(id){
+  if(!requireAdmOrGer()||!busyLock('doResetPwd')) return;
+  var err=document.getElementById('rp-err');
+  var senha=(document.getElementById('rp-pwd')||{value:''}).value||'';
+  var senha2=(document.getElementById('rp-pwd2')||{value:''}).value||'';
+  function fail(msg){if(err){err.textContent=msg;err.style.display='block';}busyUnlock('doResetPwd');}
+  if(senha.length<6){fail('A senha deve ter no mínimo 6 caracteres.');return;}
+  if(senha.length>72){fail('A senha deve ter no máximo 72 caracteres.');return;}
+  if(senha!==senha2){fail('As senhas não conferem.');return;}
+  if(!(CLOUD_ENABLED&&_sb)){fail('Sem conexão com o servidor.');return;}
+  var btn=document.querySelector('.modal-foot .btn-p');if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
+  try{
+    var result=await _sb.functions.invoke('criar-usuario',{body:{acao:'resetar_senha',usuario_id:id,senha:senha}});
+    var fnData=result.data,fnError=result.error;
+    if(fnError||(fnData&&fnData.error)){
+      if(err){err.textContent=_criarUsuarioErrMsg((fnData&&fnData.code)||'',(fnData&&fnData.error)||'Não foi possível redefinir a senha.');err.style.display='block';}
+      if(btn){btn.disabled=false;btn.textContent='💾 Salvar senha';}busyUnlock('doResetPwd');return;
+    }
+    closeModal();toast('✅ Senha redefinida com sucesso!','ok');
+  }catch(e){
+    console.error('[Fluxy/USU] erro ao redefinir senha:',e);
+    if(err){err.textContent='Erro inesperado. Tente novamente.';err.style.display='block';}
+    if(btn){btn.disabled=false;btn.textContent='💾 Salvar senha';}
+  }
+  busyUnlock('doResetPwd');
 }
 
 function confirmDeleteUser(id){

@@ -2,8 +2,8 @@
 // Cria um novo usuario dentro da MESMA empresa do usuario autenticado.
 // Regras de seguranca: role/empresa_id do chamador sao lidos do banco via
 // JWT, nunca do body. Somente ADMIN/GERENTE podem criar usuarios da MESMA
-// empresa. Nenhuma senha e transportada; um link de definicao de senha e
-// retornado. Acoes sensiveis sao registradas em public.auditoria.
+// empresa. A senha e recebida somente por HTTPS, enviada ao Supabase Auth e
+// nunca gravada em tabelas, logs ou respostas. Acoes sensiveis sao auditadas.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -83,9 +83,13 @@ const CORS_HEADERS = {
   const email = body.email
   const role = body.role
   const telefone = body.telefone
+  const senha = body.senha
 
-  if (!nome || !email || !role) {
-    return json({ error: 'Campos obrigatorios ausentes: nome, email, role.', code: 'MISSING_FIELDS' }, 400)
+  if (!nome || !email || !role || !senha) {
+    return json({ error: 'Campos obrigatorios ausentes: nome, email, role, senha.', code: 'MISSING_FIELDS' }, 400)
+}
+  if (typeof senha !== 'string' || senha.length < 6 || senha.length > 72) {
+    return json({ error: 'A senha deve ter entre 6 e 72 caracteres.', code: 'INVALID_PASSWORD' }, 400)
 }
 
   if (!ROLES_VALIDOS.includes(role)) {
@@ -142,15 +146,19 @@ const CORS_HEADERS = {
       return json({ error: 'Este e-mail ja possui uma conta de acesso vinculada.', code: 'EMAIL_ALREADY_LINKED' }, 409)
 }
     authUid = authExistente.id
-    await sb.auth.admin.updateUserById(authUid, {
+    const { error: authUpdateErr } = await sb.auth.admin.updateUserById(authUid, {
+      password: senha,
       app_metadata: { role: role, empresa_id: empresaId },
     })
+    if (authUpdateErr) {
+      console.error('[criar-usuario] Erro ao preparar auth user:', authUpdateErr.message)
+      return json({ error: 'Erro ao definir credenciais de acesso.', code: 'AUTH_UPDATE_ERROR' }, 500)
+}
     } else {
 
-    const senhaTemporaria = crypto.randomUUID() + crypto.randomUUID()
     const { data: authData, error: authErr } = await sb.auth.admin.createUser({
       email: emailLower,
-      password: senhaTemporaria,
+      password: senha,
       email_confirm: true,
       app_metadata: { role: role, empresa_id: empresaId },
       user_metadata: { nome: nome.trim() },
@@ -208,17 +216,6 @@ const CORS_HEADERS = {
     console.error('[criar-usuario] Erro ao criar auth map:', mapErr.message)
 }
 
-  const { data: linkData, error: linkErr } = await sb.auth.admin.generateLink({
-    type: 'recovery',
-    email: emailLower,
-    options: {
-        redirectTo: 'https://fluxy-erp-v3-git-staging-v2craft18-2705s-projects.vercel.app/'
-    },
-})
-  if (linkErr) {
-    console.error('[criar-usuario] Erro ao gerar link de senha:', linkErr.message)
-}
-
   await sb.from('auditoria').insert({
     empresa_id: empresaId,
     actor_auth_uid: callerUid,
@@ -234,15 +231,18 @@ const CORS_HEADERS = {
     message: usuarioExistente ? 'Usuario existente vinculado com sucesso.' : 'Usuario criado com sucesso.',
     usuario_id: usuarioId,
     auth_uid: authUid,
-    action_link: linkData && linkData.properties ? linkData.properties.action_link : null,
     vinculado_existente: !!usuarioExistente,
 }, usuarioExistente ? 200 : 201)
 })
 
 async function handleResetSenha(sb, body, callerRow, callerUid, empresaId) {
   const usuarioId = body.usuario_id
-  if (!usuarioId) {
-    return json({ error: 'Campo obrigatorio ausente: usuario_id.', code: 'MISSING_FIELDS' }, 400)
+  const senha = body.senha
+  if (!usuarioId || !senha) {
+    return json({ error: 'Campos obrigatorios ausentes: usuario_id, senha.', code: 'MISSING_FIELDS' }, 400)
+}
+  if (typeof senha !== 'string' || senha.length < 6 || senha.length > 72) {
+    return json({ error: 'A senha deve ter entre 6 e 72 caracteres.', code: 'INVALID_PASSWORD' }, 400)
 }
 
   const { data: alvo, error: alvoErr } = await sb
@@ -269,16 +269,10 @@ async function handleResetSenha(sb, body, callerRow, callerUid, empresaId) {
     return json({ error: 'Este usuario ainda nao possui uma conta de acesso vinculada.', code: 'NO_AUTH_ACCOUNT' }, 400)
 }
 
-  const { data: linkData, error: linkErr } = await sb.auth.admin.generateLink({
-    type: 'recovery',
-    email: alvo.email,
-    options: {
-        redirectTo: 'https://fluxy-erp-v3-git-staging-v2craft18-2705s-projects.vercel.app/'
-    },
-})
-  if (linkErr || !linkData) {
-    console.error('[criar-usuario] Erro ao gerar link de redefinicao:', linkErr ? linkErr.message : 'sem detalhe')
-    return json({ error: 'Erro ao gerar link de redefinicao de senha.', code: 'RESET_LINK_ERROR' }, 500)
+  const { error: resetErr } = await sb.auth.admin.updateUserById(alvo.auth_uid, { password: senha })
+  if (resetErr) {
+    console.error('[criar-usuario] Erro ao redefinir senha:', resetErr.message)
+    return json({ error: 'Erro ao redefinir senha.', code: 'RESET_PASSWORD_ERROR' }, 500)
 }
 
   await sb.from('auditoria').insert({
@@ -291,9 +285,8 @@ async function handleResetSenha(sb, body, callerRow, callerUid, empresaId) {
 })
 
   return json({
-    message: 'Link de redefinicao de senha gerado com sucesso.',
+    message: 'Senha redefinida com sucesso.',
     usuario_id: usuarioId,
-    action_link: linkData.properties ? linkData.properties.action_link : null,
 }, 200)
 }
 
