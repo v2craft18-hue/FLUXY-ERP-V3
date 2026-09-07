@@ -1207,6 +1207,71 @@ select option {
 @media (min-width: 769px) {
   #topbar { display: none !important; }
 }
+
+/* ── Final mobile containment layer ───────────────────────────────
+   Must remain after the legacy rules above so desktop declarations
+   cannot override the phone layout. */
+@media (max-width: 600px) {
+  .view, .card, .kpi-card, .field, .row, .row-between,
+  .view-header, .modal-foot, .tabs { min-width:0; max-width:100%; box-sizing:border-box; }
+
+  /* Forms and content cards need usable width on a phone. */
+  .g2, .g3, .g4 { grid-template-columns:minmax(0,1fr)!important; gap:8px!important; }
+  .gc2, .gc3 { grid-column:span 1!important; }
+  input, select, textarea { min-width:0!important; max-width:100%!important; box-sizing:border-box; }
+  .modal-foot { flex-wrap:wrap; gap:8px; }
+  .modal-foot .btn { flex:1 1 130px; min-width:0!important; }
+
+  /* KPI groups stay compact, but never squeeze below two safe columns. */
+  #dash-kpis, #rel-kpis, #entr-kpis, #nf-kpis, #ger-kpis, #cobr-kpis {
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:8px!important;
+  }
+  #dash-kpis .kpi-card, #rel-kpis .kpi-card, #entr-kpis .kpi-card,
+  #nf-kpis .kpi-card, #ger-kpis .kpi-card, #cobr-kpis .kpi-card {
+    min-width:0!important;
+    width:auto!important;
+    overflow:hidden!important;
+  }
+  .kpi-card { min-width:0!important; overflow:hidden!important; padding:11px 10px 10px!important; }
+  .kpi-label { max-width:100%; font-size:9px!important; letter-spacing:.045em!important; overflow-wrap:anywhere; }
+  .kpi-value, .kpi-val {
+    display:block;
+    min-width:0;
+    max-width:100%;
+    font-size:clamp(16px,5vw,22px)!important;
+    line-height:1.08!important;
+    letter-spacing:-.45px!important;
+    white-space:normal!important;
+    overflow-wrap:anywhere!important;
+    word-break:break-word;
+  }
+  .kpi-sub { max-width:100%; line-height:1.35; overflow-wrap:anywhere; word-break:break-word; }
+
+  /* Inline summary grids used by commissions, clients and order details. */
+  [style*="grid-template-columns:repeat(4"],
+  [style*="grid-template-columns: repeat(4"],
+  [style*="grid-template-columns:repeat(3"],
+  [style*="grid-template-columns: repeat(3"] {
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  [style*="display:grid"] > *, [style*="display: grid"] > * { min-width:0; max-width:100%; box-sizing:border-box; }
+
+  /* Recent orders: identity first, amount/status/date on their own wrapping row. */
+  .ped-row-dash { align-items:stretch; flex-direction:column; gap:7px; }
+  .ped-row-dash-left, .ped-row-dash-right { width:100%; min-width:0; }
+  .ped-row-dash-right { justify-content:flex-start!important; gap:6px; }
+  .ped-cli-name { flex:1; max-width:none!important; min-width:0; }
+
+  .card, .card * { overflow-wrap:anywhere; }
+  .badge, .tab, .btn, .ped-id-badge { overflow-wrap:normal; word-break:normal; }
+}
+
+@media (max-width: 340px) {
+  .kpi-value, .kpi-val { font-size:15px!important; }
+  .kpi-card { padding:9px 8px!important; }
+}
 </style>
 
 <!-- ═══ Supabase SDK ═══ -->
