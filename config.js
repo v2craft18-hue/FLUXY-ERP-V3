@@ -2,13 +2,14 @@
   var host = window.location.hostname;
   var PROD_HOSTS = ['fluxy-erp-v3.vercel.app'];
       var STAGING_HOSTS = ['fluxy-erp-v3-git-staging-v2craft18-2705s-projects.vercel.app']; // staging preview (branch staging)
+  var IS_PROJECT_PREVIEW = /^fluxy-erp-v3-[a-z0-9-]+-v2craft18-2705s-projects\.vercel\.app$/.test(host);
 
   var ENV;
   if (host === 'localhost' || host === '127.0.0.1') {
     ENV = 'local';
   } else if (PROD_HOSTS.indexOf(host) !== -1) {
     ENV = 'production';
-  } else if (STAGING_HOSTS.indexOf(host) !== -1) {
+  } else if (STAGING_HOSTS.indexOf(host) !== -1 || IS_PROJECT_PREVIEW) {
     ENV = 'staging';
   } else {
     ENV = 'unknown';
