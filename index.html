@@ -3850,7 +3850,7 @@ function printCatalog(){
     +'.logo{max-height:50px;max-width:120px;object-fit:contain}'
     +'.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}'
     +'.card{background:#fff;border-radius:10px;padding:14px;border:1px solid #e2e8f0;text-align:center}'
-    +'.emoji{font-size:36px;margin-bottom:8px}.name{font-weight:700;font-size:14px;margin-bottom:4px}'
+    +'.name{font-weight:700;font-size:14px;margin-bottom:4px}'
     +'.price{font-size:16px;font-weight:800;color:#3b82f6}.sub{font-size:11px;color:#64748b;margin-top:4px}'
     +'@media print{body{padding:10px}.card{break-inside:avoid}}</style></head><body>'
     +'<div class="header">'+(emp.logo?'<img class="logo" src="'+emp.logo+'" alt="Logo">':'')
@@ -3859,8 +3859,7 @@ function printCatalog(){
     +'<div class="grid">';
   for(var i=0;i<ativos.length;i++){
     var p=ativos[i];
-    html+='<div class="card"><div class="emoji">'+sanitize(p.emoji||'')+'</div>'
-      +'<div class="name">'+sanitize(p.nome)+'</div>'
+    html+='<div class="card"><div class="name">'+sanitize(stripDocEmoji(p.nome||''))+'</div>'
       +'<div class="price">'+fmt(p.preco||0)+'</div>'
       +(p.estoque!=null?'<div class="sub">Estoque: '+p.estoque+' '+sanitize(p.un||'un')+'</div>':'')
       +'</div>';
@@ -4321,9 +4320,8 @@ function renderCatalogo(){
     for(var i=0;i<ps.length;i++){
       var p=ps[i];
       html+='<div class="card" style="padding:10px;text-align:center">'
-        +(p.foto?'<img src="'+p.foto+'" style="width:100%;max-height:80px;object-fit:contain;border-radius:6px;margin-bottom:6px">'
-                :'<div style="height:60px;background:var(--s2);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:6px">'+sanitize(p.emoji||'📦')+'</div>')
-        +'<div class="fw7 fs12 t0">'+sanitize(p.nome)+'</div>'
+        +(p.foto?'<img src="'+p.foto+'" style="width:100%;max-height:80px;object-fit:contain;border-radius:6px;margin-bottom:6px">':'')
+        +'<div class="fw7 fs12 t0">'+sanitize(stripDocEmoji(p.nome||''))+'</div>'
         +'<div class="fw8 blue mt2">'+fmt(p.preco||0)+'</div>'
         +(p.estoque>0?'<div class="fs10 t3 mt1">Estoque: '+p.estoque+'</div>':'<div class="fs10" style="color:var(--red);margin-top:2px">Esgotado</div>')
         +'</div>';
@@ -4358,7 +4356,7 @@ function printCatalogo(){
     for(var i=0;i<ps2.length;i++){
       var p=ps2[i];
       html+='<div class="card">'
-        +(p.foto?'<img src="'+p.foto+'" style="width:100%;max-height:70px;object-fit:contain;margin-bottom:4px">':'<div style="font-size:32px;margin-bottom:4px">'+sanitize(p.emoji||'📦')+'</div>')
+        +(p.foto?'<img src="'+p.foto+'" style="width:100%;max-height:70px;object-fit:contain;margin-bottom:4px">':'')
         +'<div style="font-size:11px;font-weight:700">'+sanitize(stripDocEmoji(p.nome||''))+'</div>'
         +'<div style="font-size:13px;font-weight:800;color:#2563EB;margin-top:4px">'+fmt(p.preco||0)+'</div>'
         +'</div>';
@@ -4846,7 +4844,7 @@ function sanitize(v){
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
-// ── Document emoji stripper — used only in generated docs, not in UI ──
+// ── Product-name emoji stripper — used in UI and generated documents ──
 function stripDocEmoji(v){
   if(!v) return '';
   return String(v).replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{FE20}-\u{FE2F}\u{1FA00}-\u{1FA9F}\u{1FAD0}-\u{1FAD6}\u{200D}\u{20E3}\u{FE0F}]/gu,'').trim();
@@ -6231,7 +6229,7 @@ function renderProd(){
     html+='<div class="card">'
       +'<div class="row-between mb8">'
         +'<div class="row gap8 mb0">'
-          +'<div class="fw7 t0">'+(p.emoji||'📦')+' '+p.nome+'</div>'
+          +'<div class="fw7 t0">'+sanitize(stripDocEmoji(p.nome||''))+'</div>'
           +commBadge+nfBadge
         +'</div>'
         +'<div class="row gap4">'
@@ -6676,12 +6674,11 @@ function nvFilterProds(){
         +'<input type="number" step="0.01" value="'+inCart.preco+'" min="0"'
         +' style="width:80px;background:var(--s2);border:1px solid var(--b1);border-radius:6px;color:var(--t0);padding:3px 7px;font-size:12px;font-family:inherit"'
         +' data-pid="'+p.id+'" oninput="nvEditPreco(this.dataset.pid,parseFloat(this.value)||0)" onchange="nvEditPreco(this.dataset.pid,parseFloat(this.value)||0)">'
-        +'<span class="fs10 t3">orig: '+fmt(p.preco)+'</span>'
         +'</div>';
     }
     var _nvEst=estDisponivel(p); var _nvEstHtml=_nvEst<=0?' <span style="font-size:10px;color:#FCA5A5;font-weight:700">(SEM ESTOQUE)</span>':(p.estMin&&_nvEst<=p.estMin?' <span style="font-size:10px;color:#FCD34D">⚠️ '+_nvEst+(p.un?' '+p.un:'')+'</span>':' <span style="font-size:10px;color:var(--t3)">'+_nvEst+(p.un?' '+p.un:'')+'</span>'); if(_nvEst<=0) card.style.opacity='0.4';
     card.innerHTML='<div class="row-between">'
-      +'<div><div class="fw7">'+(p.emoji||'📦')+' '+p.nome+commTag+_nvEstHtml+'</div>'
+      +'<div><div class="fw7">'+sanitize(stripDocEmoji(p.nome||''))+commTag+_nvEstHtml+'</div>'
         +'<div class="t2 fs11">'+fmt(p.preco)+'/'+(p.un||'un')+'</div>'+editRow
       +'</div>'
       +'<div>'+btnsHtml+'</div>'
@@ -6843,11 +6840,9 @@ function nvStep3(){
     var unitOrig=it.precoOrig!=null?it.precoOrig:it.preco;
     var lineSale=it.preco*it.qty;
     var lineOrig=unitOrig*it.qty;
-    var editedTag=(Math.abs(unitOrig-it.preco)>0.001)
-      ?'<span style="font-size:10px;color:var(--yellow);margin-left:4px">orig: '+fmt(lineOrig)+'</span>':'';
     html+='<div class="row-between fs12 mb6">'
-      +'<span>'+it.emoji+' '+it.nome+' x'+it.qty+'</span>'
-      +'<span class="mono">'+fmt(lineSale)+editedTag+'</span>'
+      +'<span>'+sanitize(stripDocEmoji(it.nome||''))+' x'+it.qty+'</span>'
+      +'<span class="mono">'+fmt(lineSale)+'</span>'
       +'</div>';
   }
   html+='<div style="height:1px;background:var(--b1);margin:8px 0"></div>';
@@ -7566,7 +7561,7 @@ function verPed(id){
   for(var i=0;i<(p.itens||[]).length;i++){
     var it=p.itens[i];
     sub+=it.preco*it.qty;
-    html+='<div class="row-between fs12 mb4"><span>'+(it.emoji||'📦')+' '+it.nome+' x'+it.qty+'</span><span class="mono">'+fmt(it.preco*it.qty)+'</span></div>';
+    html+='<div class="row-between fs12 mb4"><span>'+sanitize(stripDocEmoji(it.nome||''))+' x'+it.qty+'</span><span class="mono">'+fmt(it.preco*it.qty)+'</span></div>';
   }
   html+='<div style="height:1px;background:var(--b1);margin:10px 0"></div>'
     +'<div class="row-between fw7 mb4"><span>Subtotal</span><span class="mono">'+fmt(sub)+'</span></div>'
@@ -8218,7 +8213,7 @@ function _renderEntregaCard(p, inp, res){
   for(var k=0;k<Math.min((p.itens||[]).length,4);k++){
     var it=p.itens[k];
     prodHtml+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--b1)">'+
-      '<span class="t1">'+(it.emoji||'📦')+' '+sanitize(it.nome)+' ×'+it.qty+'</span>'+
+      '<span class="t1">'+sanitize(stripDocEmoji(it.nome||''))+' ×'+it.qty+'</span>'+
       '<span class="mono t2">'+fmt(it.preco*it.qty)+'</span>'+
     '</div>';
   }
@@ -8856,7 +8851,7 @@ function exportRelPDF(){
     var pct=total>0?Math.round(it.receita/total*100):0;
     var bg=idx%2===0?'#ffffff':'#f8fafc';
     return '<tr style="background:'+bg+'">'
-      +'<td style="padding:8px 10px;font-size:12px">'+it.emoji+' '+it.nome+'</td>'
+      +'<td style="padding:8px 10px;font-size:12px">'+sanitize(stripDocEmoji(it.nome||''))+'</td>'
       +'<td style="padding:8px 10px;font-size:12px;text-align:center;font-weight:700;color:#3b82f6">'+it.qty+'</td>'
       +'<td style="padding:8px 10px;font-size:12px;text-align:right;font-weight:700;color:#16a34a;font-family:monospace">R$ '+it.receita.toFixed(2)+'</td>'
       +'<td style="padding:8px 10px;font-size:11px;color:#64748b;text-align:center">'+pct+'%</td>'
@@ -8968,7 +8963,7 @@ function renderRelEstoque(){
     var disp=estDisponivel(p);
     var st=disp<=0?'<span style="color:#FCA5A5;font-weight:700">❌ Zerado</span>':(p.estMin&&disp<=p.estMin?'<span style="color:#FCD34D;font-weight:700">⚠️ Baixo</span>':'<span style="color:#6EE7B7;font-weight:700">✅ OK</span>');
     html+='<tr>'
-      +'<td><b>'+(p.emoji||'📦')+' '+sanitize(p.nome||'')+'</b>'+(p.marca?'<br><span style="font-size:11px;color:var(--t3)">'+sanitize(p.marca)+'</span>':'')+'</td>'
+      +'<td><b>'+sanitize(stripDocEmoji(p.nome||''))+'</b>'+(p.marca?'<br><span style="font-size:11px;color:var(--t3)">'+sanitize(p.marca)+'</span>':'')+'</td>'
       +'<td style="text-align:center">'+(p.estoque||0)+'</td>'
       +'<td style="text-align:center">'+(p.estReservado||0)+'</td>'
       +'<td style="text-align:center;font-weight:700">'+disp+'</td>'
@@ -9099,7 +9094,7 @@ function relBuildProdutosTab(aprovados){
     var pct=totalRec>0?Math.round(it.receita/totalRec*100):0;
     html+='<div style="padding:10px 10px 8px;border-bottom:1px solid var(--b1)">'
       +'<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:center;margin-bottom:6px">'
-        +'<div style="font-size:13px;font-weight:600;color:var(--t0)">'+it.emoji+' '+it.nome+'</div>'
+        +'<div style="font-size:13px;font-weight:600;color:var(--t0)">'+sanitize(stripDocEmoji(it.nome||''))+'</div>'
         +'<div style="text-align:center;font-size:13px;font-weight:700;color:var(--blue);min-width:36px">'+it.qty+'</div>'
         +'<div style="text-align:center;font-size:12px;color:var(--t3);min-width:48px">'+it.pedidos+' ped.</div>'
         +'<div style="text-align:right;font-size:13px;font-weight:700;color:var(--green);font-family:monospace;min-width:80px">'+fmt(it.receita)+'</div>'
@@ -9450,7 +9445,7 @@ function nvCartCommHtml(cart, disc){
 
     html += '<div style="padding:8px 0;border-bottom:1px solid var(--b1)">'
       + '<div class="row-between">'
-        + '<span class="fw6 fs12 t0">'+(it.emoji||'📦')+' '+it.nome+' ×'+qty+'</span>'
+        + '<span class="fw6 fs12 t0">'+sanitize(stripDocEmoji(it.nome||''))+' ×'+qty+'</span>'
         + '<span class="mono fw7" style="color:'+(icF>0?'var(--green)':'var(--t3)')+'">R$ '+icF.toFixed(2)+'</span>'
       + '</div>'
       + detailHtml
@@ -10226,7 +10221,7 @@ function getGerPeds(){
   var result=[];
   for(var i=0;i<peds.length;i++){
     var p=peds[i];
-    if(p.paraGerente || p.status==='pendente' || p.status==='pendente_ger' || p.status==='aprovado_ger' || p.status==='recusado_ger' || p.status==='cancelado_ger') result.push(p);
+    if(p.paraGerente || p.gerenteId || p.status==='pendente' || p.status==='pendente_ger' || p.status==='aprovado_ger' || p.status==='recusado_ger' || p.status==='cancelado_ger') result.push(p);
   }
   return result;
 }
@@ -10293,7 +10288,7 @@ function renderDashGerente(){
     var st=myPeds[i].status;
     if(st==='pendente_ger') nPend++;
     else if(st==='aprovado_ger'){nAprov++;totalAprov+=myPeds[i].total||0;}
-    else if(st==='cancelado_ger') nCancel++;
+    else if(st==='cancelado_ger'||st==='cancelado') nCancel++;
   }
   var kpisEl=document.getElementById('dash-kpis');
   if(kpisEl){
@@ -10346,7 +10341,7 @@ function renderGerente(){
     var st=myPeds[i].status;
     if(st==='pendente_ger')  nPend++;
     else if(st==='aprovado_ger'){nAprov++;totalAprov+=myPeds[i].total||0;}
-    else if(st==='cancelado_ger') nCancel++;
+    else if(st==='cancelado_ger'||st==='cancelado') nCancel++;
     else if(st==='recusado_ger')  nRecus++;
   }
   var kpEl=document.getElementById('ger-kpis');
@@ -10361,7 +10356,9 @@ function renderGerente(){
 
   // Filter
   var list=myPeds;
-  if(gerTab!=='todos_ger') list=myPeds.filter(function(p){return p.status===gerTab;});
+  if(gerTab!=='todos_ger') list=myPeds.filter(function(p){
+    return p.status===gerTab || (gerTab==='cancelado_ger' && p.status==='cancelado');
+  });
   list.sort(function(a,b){return (b._ts||0)-(a._ts||0);});
 
   el.innerHTML='';
@@ -10396,7 +10393,7 @@ function renderGerente(){
       }
       var isPend   = st==='pendente_ger';
       var isAprov  = st==='aprovado_ger';
-      var isCancel = st==='cancelado_ger';
+      var isCancel = st==='cancelado_ger'||st==='cancelado';
       var isRecus  = st==='recusado_ger';
       // canAct: ADM always, GER can act on orders assigned to them OR unassigned
       var canAct = isAdm() || (isGer() && (
@@ -10416,7 +10413,7 @@ function renderGerente(){
       for(var k=0;k<Math.min((p.itens||[]).length,3);k++){
         var it=p.itens[k];
         itensHtml+='<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;color:var(--t2)">'
-          +'<span>'+(it.emoji||'📦')+' '+it.nome+' ×'+it.qty+'</span>'
+          +'<span>'+sanitize(stripDocEmoji(it.nome||''))+' ×'+it.qty+'</span>'
           +'<span style="font-family:monospace;color:var(--t3)">'+fmt(it.preco*it.qty)+'</span>'
         +'</div>';
       }
@@ -10667,7 +10664,8 @@ async function gerCancelConfirm(pedId){
   }
 
   var r = await _lifecycleRpc({
-    busyKey:'gerCancel', action:'cancelarGer', pedidoId:existing._sbId, rpcName:'cancelar_pedido_gerente',
+    busyKey:'gerCancel', action:isAdm()?'cancelarAdm':'cancelarGer', pedidoId:existing._sbId,
+    rpcName:isAdm()?'cancelar_pedido_admin':'cancelar_pedido_gerente',
     args:{ p_pedido_id:existing._sbId, p_versao:existing.versao, p_motivo: mot||null }
   });
   if(!r.ok) return;
@@ -13683,12 +13681,10 @@ function epBuildItemsList(){
   var html='';
   for(var i=0;i<_FLUXI_UI.ep.itens.length;i++){
     var it=_FLUXI_UI.ep.itens[i];
-    var unitOrig=it.precoOrig!=null?it.precoOrig:it.preco;
     html+='<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--s1);border-radius:var(--r);margin-bottom:6px;flex-wrap:wrap" data-ep-idx="'+i+'">'
       // product info
       +'<div style="flex:1;min-width:120px">'
-        +'<div class="fs12 fw7 t0">'+(it.emoji||'📦')+' '+it.nome+'</div>'
-        +'<div class="fs10 t3">Orig: '+fmt(unitOrig)+'/un</div>'
+        +'<div class="fs12 fw7 t0">'+sanitize(stripDocEmoji(it.nome||''))+'</div>'
       +'</div>'
       // price input
       +'<div style="display:flex;align-items:center;gap:4px">'
@@ -13774,9 +13770,8 @@ function epBuildProdList(prods,q){
     var bg=alreadyIn?'rgba(16,185,129,.08)':'var(--s1)';
     var div=document.createElement?null:null; // use string building
     html+='<div data-pid="'+pr.id+'" onclick="epAddProd(this.dataset.pid)" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:'+bg+';border:1px solid var(--b2);border-radius:var(--r);margin-bottom:6px;cursor:pointer;touch-action:manipulation">'
-      +'<span style="font-size:20px">'+(pr.emoji||'📦')+'</span>'
       +'<div style="flex:1;min-width:0">'
-        +'<div class="fs13 fw7 t0" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(pr.nome||'')+'</div>'
+        +'<div class="fs13 fw7 t0" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(stripDocEmoji(pr.nome||''))+'</div>'
         +(pr.sku?'<div class="fs10 t3">SKU: '+pr.sku+'</div>':'')
       +'</div>'
       +'<div style="text-align:right;flex-shrink:0">'
