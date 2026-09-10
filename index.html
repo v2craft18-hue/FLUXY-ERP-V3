@@ -1211,7 +1211,7 @@ select option {
 /* ── Final mobile containment layer ───────────────────────────────
    Must remain after the legacy rules above so desktop declarations
    cannot override the phone layout. */
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .view, .card, .kpi-card, .field, .row, .row-between,
   .view-header, .modal-foot, .tabs { min-width:0; max-width:100%; box-sizing:border-box; }
 
@@ -1269,6 +1269,9 @@ select option {
 }
 
 @media (max-width: 340px) {
+  #dash-kpis, #rel-kpis, #entr-kpis, #nf-kpis, #ger-kpis, #cobr-kpis {
+    grid-template-columns:minmax(0,1fr)!important;
+  }
   .kpi-value, .kpi-val { font-size:15px!important; }
   .kpi-card { padding:9px 8px!important; }
 }
@@ -3150,21 +3153,27 @@ async function _prodUpsertSb(prodObj){
 
 async function _prodDeleteSb(id){
   // Soft delete (ativo=false) no Supabase
-  if(!CLOUD_ENABLED || !_sb || !SESS || !id) return;
+  if(!CLOUD_ENABLED || !_sb || !SESS || !id) throw new Error('Conexão com o servidor indisponível.');
+  if(!navigator.onLine) throw new Error('Sem internet. Conecte-se para excluir o produto.');
+  if(!(await _hasSupabaseSession())) throw new Error('Sessão expirada. Faça login novamente.');
   try {
-    var { error } = await _sb
+    var { data, error } = await _sb
       .from('produtos')
       .update({ ativo: false })
       .eq('id', id)
-      .eq('empresa_id', SESS.empresaId);
+      .eq('empresa_id', SESS.empresaId)
+      .select('id,ativo')
+      .maybeSingle();
     
     if(error) {
-      console.error('[Fluxy/PROD] Erro ao deletar produto:', error.message);
-      return;
+      throw error;
     }
+    if(!data || data.ativo !== false) throw new Error('O servidor não confirmou a exclusão do produto.');
     console.log('[Fluxy/PROD] Produto '+id+' desativado no Supabase');
+    return data;
   } catch(e) {
     console.error('[Fluxy/PROD] Erro inesperado em _prodDeleteSb:', e.message);
+    throw e;
   }
 }
 
@@ -3478,6 +3487,8 @@ async function doLogin(){
   var err=document.getElementById('login-err');
   if(err) err.style.display='none';
   if(!email||!pwd){showErr('Preencha e-mail e senha.');return;}
+  if(!navigator.onLine){showErr('Sem internet. Conecte-se para entrar no Fluxy ERP.');return;}
+  if(!CLOUD_ENABLED || !_sb){showErr('Servidor indisponível. Tente novamente em alguns instantes.');return;}
   
   // 1. Autenticação real no Supabase (estabelece sessão → RLS libera os dados da empresa)
   if(CLOUD_ENABLED && _sb && navigator.onLine){
@@ -3504,15 +3515,6 @@ async function doLogin(){
         } catch(_){}
         if(!userId) userId=uid;
         resetLoginAttempts();
-        // Cache local para login offline futuro
-        try {
-          var pwdHashStr=await hashPwd(pwd);
-          var us=getUsers()||[];
-          var found=false;
-          for(var k=0;k<us.length;k++){ if(us[k].id===userId||us[k].email===email){ us[k].pwd=pwdHashStr; us[k].empresaId=empresaId; us[k].role=role; us[k].nome=nome; found=true; break; } }
-          if(!found) us.push({ id:userId, empresaId:empresaId, nome:nome, email:email, pwd:pwdHashStr, role:role, ativo:true, status:'ativo' });
-          saveUsers(us);
-        } catch(_){}
         SESS={userId:userId,nome:nome,email:email,role:role,empresaId:empresaId,plano:'basico'};
         APP_STATE.session=SESS;
         APP_STATE.set('auth.logged',true);
@@ -3522,44 +3524,15 @@ async function doLogin(){
         showApp();
         return;
       }
-      console.warn('[Fluxy/Login] Supabase auth falhou, tentando local:', ae && ae.message);
+      console.warn('[Fluxy/Login] Supabase auth falhou:', ae && ae.message);
+      showErr((ae&&ae.message)?'Não foi possível entrar: '+ae.message:'E-mail ou senha incorretos.');
+      return;
     } catch(e){
-      console.warn('[Fluxy/Login] Erro Supabase auth, tentando local:', e.message);
+      console.warn('[Fluxy/Login] Erro Supabase auth:', e.message);
+      showErr('Não foi possível confirmar o acesso no servidor. Tente novamente.');
+      return;
     }
   }
-  
-  // 2. Fallback: autenticação local (offline ou contas legadas)
-  var users=getUsers();
-  // Find user by email first (case-insensitive)
-  var candidate=null;
-  for(var i=0;i<users.length;i++){
-    var u=users[i];
-    if(!u||!u.email) continue;
-    if(u.email.trim().toLowerCase()===email){ candidate=u; break; }
-  }
-  if(!candidate){showErr('E-mail ou senha incorretos. Verifique e tente novamente.');recordFailedLogin();return;}
-  // Async password verification (handles both PBKDF2 and legacy djb2)
-  pwdVerify(pwd, candidate.pwd).then(function(valid){
-    if(!valid){showErr('E-mail ou senha incorretos. Verifique e tente novamente.');recordFailedLogin();return;}
-    if(candidate.status==='desligado'){showErr('Seu acesso foi removido do sistema.');return;}
-    if(candidate.ativo===false||candidate.status==='bloqueado'){showErr('Seu acesso está bloqueado. Entre em contato com o administrador.');return;}
-    resetLoginAttempts();
-    // Transparent hash upgrade: if stored as legacy djb2, re-hash with PBKDF2 on login
-    if(candidate.pwd&&candidate.pwd.charAt(0)==='h'){
-      pwdHash(pwd).then(function(newHash){
-        var us=getUsers();
-        for(var j=0;j<us.length;j++) if(us[j].id===candidate.id){us[j].pwd=newHash;break;}
-        saveUsers(us);
-      }).catch(function(){});
-    }
-    SESS={userId:candidate.id,nome:candidate.nome,email:candidate.email,role:candidate.role,empresaId:candidate.empresaId||null,plano:candidate.plano||'basico'};
-    APP_STATE.session=SESS;
-    APP_STATE.set('auth.logged',true);
-    APP_STATE.set('auth.role',candidate.role);
-    APP_STATE.set('auth.user',candidate.nome);
-    stor_set(KEYS.sess,SESS);
-    showApp();
-  }).catch(function(){showErr('Erro ao verificar senha. Tente novamente.');});
 }
 
 function showErr(msg){
@@ -6217,7 +6190,7 @@ function renderProd(){
   try {
   if(currentView!=='produtos') return;
   var q=(document.getElementById('prod-q')||{value:''}).value.toLowerCase().trim();
-  var all=getProds();
+  var all=getProds().filter(function(p){ return p && p.ativo!==false; });
   var list=all;
   if(q){
     list=all.filter(function(p){
@@ -6572,16 +6545,18 @@ function saveProd(editId){
   toast('✅ Produto salvo! Cód: '+barcode);
 }
 
-function delProd(id){
+async function delProd(id){
   if(!isAdm()||!confirm('Excluir produto?')) return;
-  var prods = getProds();
-  var n = [];
-  for(var i=0;i<prods.length;i++){ if(prods[i].id!==id) n.push(prods[i]); }
-  saveProds(n);
-  // Sincroniza exclusão com Supabase (async, sem bloquear)
-  if(CLOUD_ENABLED && id) _prodDeleteSb(id).catch(function(e){ console.error('[Fluxy/PROD] erro em _prodDeleteSb:', e); });
-  safeRender('produtos',renderProd);
-  toast('🗑️ Produto excluído.');
+  if(!navigator.onLine){ toast('Sem internet. Conecte-se para excluir o produto.','err'); return; }
+  try{
+    await _prodDeleteSb(id);
+    await loadProdsFromSb();
+    safeRender('produtos',renderProd);
+    toast('🗑️ Produto excluído.');
+  }catch(e){
+    console.error('[Fluxy/PROD] exclusão não confirmada:',e);
+    toast('Não foi possível excluir o produto: '+(e&&e.message?e.message:'erro desconhecido'),'err');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -12812,14 +12787,13 @@ function _setupOfflineListeners(){
   window.addEventListener('online',function(){
     APP_STATE.offline.isOnline=true;
     console.log('[Fluxy] Conexão restaurada');
-    toast('Conexão restaurada — sincronizando...','info');
-    _flushQueue().catch(function(e){console.error('[Fluxy/Flush] Erro:',e.message);});
   });
   
   window.addEventListener('offline',function(){
     APP_STATE.offline.isOnline=false;
-    console.log('[Fluxy] Modo offline ativado');
-    toast('Modo offline — alterações serão sincronizadas','warning');
+    console.log('[Fluxy] Conexão perdida — encerrando acesso local');
+    doLogout();
+    showErr('Sem internet. Conecte-se para entrar no Fluxy ERP.');
   });
   
   // Heartbeat a cada 45s
@@ -14105,6 +14079,13 @@ seedAdmin();
 seed();
 loadSession();
 _fluxyScheduleSessionSync();
+// Supabase is the source of truth: a cached local session must never open the ERP offline.
+if(SESS && !navigator.onLine){
+  SESS=null;
+  APP_STATE.session=null;
+  APP_STATE.set('auth.logged',false);
+  stor_set(KEYS.sess,null);
+}
 async function _verifyCloudSessionOnBoot(){
    if(!CLOUD_ENABLED || !_sb || !SESS) return;
    if(!navigator.onLine) return;
@@ -14136,17 +14117,9 @@ if(SESS){
     syncCloud('cobr');
     syncCloud('rotas');
     syncCloud('usuarios');
-    // Migração automática de dados locais para Supabase (Etapa 9)
-    migrateDataToSb().catch(function(e){ console.error('[Fluxy/MIG] Erro na migração:', e.message); });
-    // Setup offline listeners (Etapa 10)
+    // O servidor é a fonte de verdade. Migração/fila legadas permanecem
+    // desativadas para não recriar registros a partir do armazenamento local.
     _setupOfflineListeners();
-    // Carregar fila pendente do boot anterior
-    var pendingQueue=stor_get('fz_queue_pending')||[];
-    if(pendingQueue.length>0){
-      console.log('[Fluxy/Queue] Fila carregada com',pendingQueue.length,'operações pendentes');
-      APP_STATE.queue.pending=pendingQueue;
-      _flushQueue().catch(function(e){console.error('[Fluxy/Flush] Erro ao processar fila:',e.message);});
-    }
   }
   showApp();
 } else {
@@ -14178,41 +14151,18 @@ function pwaShowUpdateBar(){
 // ── Register Service Worker ──────────────────────────────────────
 function pwaRegister(){
   if(!('serviceWorker' in navigator)) return;
-  // Skip SW registration when running as a local file or on preview servers
-  var loc=window.location.href;
-  if(loc.startsWith('file://') || loc.includes('claudeusercontent.com') || loc.includes('localhost') && loc.indexOf('sw.js')<0){
-    // SW only works when hosted on your own server with sw.js alongside index.html
-    console.log('[Fluxy] SW: não registrado (ambiente de preview — normal)');
-    return;
+  // Online-only staging: remove every previous worker and its cached app shell.
+  // This preserves the installed shortcut, but prevents stale/local ERP execution.
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    return Promise.all(regs.map(function(reg){ return reg.unregister(); }));
+  }).catch(function(e){ console.warn('[Fluxy/PWA] falha ao remover Service Worker:',e); });
+  if('caches' in window){
+    caches.keys().then(function(keys){
+      return Promise.all(keys.filter(function(k){return k.indexOf('fluxy-')===0;}).map(function(k){return caches.delete(k);}));
+    }).catch(function(e){ console.warn('[Fluxy/PWA] falha ao limpar cache antigo:',e); });
   }
-  navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'})
-    .then(function(reg){
-      _pwaWorker=reg;
-      // The worker may already be waiting before this page registers its
-      // updatefound listener (for example after reopening an installed PWA).
-      if(reg.waiting&&navigator.serviceWorker.controller) pwaShowUpdateBar();
-      // Check for updates every 30 min
-      if(window._swUpdateInterval) clearInterval(window._swUpdateInterval);
-    window._swUpdateInterval=setInterval(function(){try{reg.update();}catch(e){}},30*60*1000);
-      // New SW waiting = update available
-      reg.addEventListener('updatefound',function(){
-        var newSW=reg.installing;
-        if(!newSW) return;
-        newSW.addEventListener('statechange',function(){
-          if(newSW.state==='installed'&&navigator.serviceWorker.controller){
-            pwaShowUpdateBar();
-          }
-        });
-      });
-    })
-    .catch(function(e){ console.warn('SW register failed:',e); });
-
-  // Page controlled by SW — refresh after update
-  navigator.serviceWorker.addEventListener('controllerchange',function(){
-    if(_pwaReloading) return;
-    _pwaReloading=true;
-    window.location.reload();
-  });
+  var updateBar=document.getElementById('pwa-update-bar');
+  if(updateBar) updateBar.style.display='none';
 }
 
 function pwaActivateUpdate(){
