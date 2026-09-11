@@ -2864,6 +2864,56 @@ async function _hasSupabaseSession(){
   } catch(_){ return false; }
 }
 
+// Online-only security gate. Supabase is the source of truth; a token restored
+// from browser storage is not enough to unlock the ERP.
+var _fluxyOnlineVerified=false;
+var _fluxyOfflineListenersReady=false;
+function _fluxyShowConnectionLock(message){
+  _fluxyOnlineVerified=false;
+  var lock=document.getElementById('fluxy-connection-lock');
+  if(!lock){
+    lock=document.createElement('div');
+    lock.id='fluxy-connection-lock';
+    lock.setAttribute('role','alert');
+    lock.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#050816;color:#fff;display:flex;align-items:center;justify-content:center;padding:24px;font-family:Inter,system-ui,sans-serif;text-align:center;';
+    lock.innerHTML='<div style="width:min(430px,100%);background:#0d1324;border:1px solid rgba(239,68,68,.45);border-radius:18px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.55)"><div style="font-size:42px;margin-bottom:12px">📡</div><div style="font-size:22px;font-weight:800;margin-bottom:10px">Sem conexão com o servidor</div><div id="fluxy-connection-message" style="color:#cbd5e1;line-height:1.55;margin-bottom:18px"></div><button type="button" onclick="location.reload()" style="border:0;border-radius:10px;background:#3b82f6;color:white;font-weight:800;padding:12px 18px;cursor:pointer">Tentar novamente</button></div>';
+    document.body.appendChild(lock);
+  }
+  var msg=document.getElementById('fluxy-connection-message');
+  if(msg) msg.textContent=message||'Conecte-se à internet e tente novamente. O Fluxy ERP não funciona offline.';
+  lock.style.display='flex';
+}
+function _fluxyHideConnectionLock(){
+  var lock=document.getElementById('fluxy-connection-lock');
+  if(lock) lock.style.display='none';
+}
+async function _fluxyVerifyServerConnection(){
+  if(!navigator.onLine || !CLOUD_ENABLED || !_sb || !_sb.auth){
+    _fluxyShowConnectionLock();
+    return false;
+  }
+  try{
+    // getUser() reaches Supabase and validates the token server-side. Unlike
+    // getSession(), it cannot succeed using only a cached local token.
+    var result=await _sb.auth.getUser();
+    var ok=!!(result && !result.error && result.data && result.data.user);
+    _fluxyOnlineVerified=ok;
+    if(ok) _fluxyHideConnectionLock();
+    else _fluxyShowConnectionLock('Não foi possível confirmar sua sessão no servidor. Conecte-se e entre novamente.');
+    return ok;
+  }catch(e){
+    _fluxyShowConnectionLock();
+    return false;
+  }
+}
+function _fluxyRequireOnline(){
+  if(!navigator.onLine || !_fluxyOnlineVerified){
+    _fluxyShowConnectionLock();
+    return false;
+  }
+  return true;
+}
+
 function _cliToSb(cliObj){
   // Converte objeto local (camelCase) → formato Supabase (snake_case + empresa_id)
   if(!cliObj || !SESS) return null;
@@ -2949,15 +2999,16 @@ async function loadEmpresaFromSb(){
 }
 
 async function hydrateAllFromSb(){
-  // Estratégia A — Cache Hidratado. Supabase como fonte principal;
-  // localStorage permanece como cache/offline. Aborta sem UUID válido.
+  // Supabase é a fonte principal. O cache nunca autoriza uso offline.
   if(!CLOUD_ENABLED || !_sb || !SESS){
-    console.log('[Fluxy] Cloud indisponível — operando via localStorage');
+    console.log('[Fluxy] Cloud indisponível — acesso bloqueado');
+    _fluxyShowConnectionLock();
     return;
   }
   if(!isValidUUID(SESS && SESS.empresaId)){
     console.warn('[Fluxy] empresaId inválido:', SESS && SESS.empresaId,
-      '- sync Supabase desativado, usando localStorage');
+      '- acesso bloqueado até nova autenticação');
+    _fluxyShowConnectionLock('Não foi possível confirmar a empresa desta sessão. Entre novamente.');
     return;
   }
   try {
@@ -3586,6 +3637,7 @@ async function doLogin(){
         APP_STATE.set('auth.role',role);
         APP_STATE.set('auth.user',nome);
         stor_set(KEYS.sess,SESS);
+        _fluxyOnlineVerified=true;
         showApp();
         return;
       }
@@ -4609,6 +4661,7 @@ function _safeStoredView(v){
 
 function showApp(){
   console.log('[v0-AUDIT] showApp() START');
+  if(!_fluxyRequireOnline()) return;
   document.getElementById('login-wrap').style.display = 'none';
   document.getElementById('app').className = 'visible';
   console.log('[v0-AUDIT] showApp() DOM updated, calling updateSidebar');
@@ -5292,6 +5345,7 @@ function go(v){
   var _viewToken = ++CURRENT_VIEW_TOKEN;
   console.log('[v0-AUDIT] go() after token increment: _viewToken='+_viewToken+', CURRENT_VIEW_TOKEN='+CURRENT_VIEW_TOKEN);
   try {
+  if(SESS && !_fluxyRequireOnline()) return;
   // Permitir acesso a signup e login sem autenticação
   if(!SESS && v!=='signup' && v!=='reset-pwd'){ return; }
   // Permission checks
@@ -12721,6 +12775,7 @@ async function isCloudAvailable(forceCheck){
   // Check imediato se sem internet
   if(!navigator.onLine){
     APP_STATE.offline.isOnline=false;
+    _fluxyShowConnectionLock();
     return false;
   }
   
@@ -12731,17 +12786,27 @@ async function isCloudAvailable(forceCheck){
       .limit(1);
     
     APP_STATE.offline.isOnline=!error;
+    _fluxyOnlineVerified=!error;
     APP_STATE.offline.lastCheck=now;
+    if(error) _fluxyShowConnectionLock();
     return !error;
   }catch(e){
     APP_STATE.offline.isOnline=false;
+    _fluxyOnlineVerified=false;
     APP_STATE.offline.lastCheck=now;
+    _fluxyShowConnectionLock();
     return false;
   }
 }
 
 // Enfileirar operação com deduplicação
 function _enqueueOperationDedup(modulo,op,data){
+  // Online-only: never save a mutation for later replay. That would show false
+  // success and could recreate a record that was already removed.
+  console.warn('[Fluxy/Queue] Operação offline recusada:',modulo,op,data&&data.id);
+  _fluxyShowConnectionLock('A operação não foi salva. Reconecte-se e tente novamente.');
+  return false;
+  /* Legacy queue retained below for audit/rollback, but intentionally unreachable. */
   // Verificar se operação idêntica já está pendente
   var existing=APP_STATE.queue.pending.find(function(item){
     return item.modulo===modulo && item.op===op && item.data.id===data.id;
@@ -12881,22 +12946,24 @@ async function _flushQueue(){
 
 // Setup listeners offline
 function _setupOfflineListeners(){
+  if(_fluxyOfflineListenersReady) return;
+  _fluxyOfflineListenersReady=true;
   window.addEventListener('online',function(){
     APP_STATE.offline.isOnline=true;
-    console.log('[Fluxy] Conexão restaurada');
+    console.log('[Fluxy] Conexão restaurada — recarregando para validar o servidor');
+    location.reload();
   });
   
   window.addEventListener('offline',function(){
     APP_STATE.offline.isOnline=false;
-    console.log('[Fluxy] Conexão perdida — encerrando acesso local');
-    doLogout();
-    showErr('Sem internet. Conecte-se para entrar no Fluxy ERP.');
+    console.log('[Fluxy] Conexão perdida — bloqueando acesso local');
+    _fluxyShowConnectionLock();
   });
   
   // Heartbeat a cada 45s
   setInterval(function(){
     if(!CLOUD_ENABLED||!_sb) return;
-    isCloudAvailable(true).catch(function(){});
+    _fluxyVerifyServerConnection().catch(function(){});
   },APP_STATE.offline.checkInterval);
 }
 
@@ -14173,6 +14240,7 @@ seedAdmin();
 seed();
 loadSession();
 _fluxyScheduleSessionSync();
+_setupOfflineListeners();
 // Supabase is the source of truth: a cached local session must never open the ERP offline.
 if(SESS && !navigator.onLine){
   SESS=null;
@@ -14180,45 +14248,28 @@ if(SESS && !navigator.onLine){
   APP_STATE.set('auth.logged',false);
   stor_set(KEYS.sess,null);
 }
-async function _verifyCloudSessionOnBoot(){
-   if(!CLOUD_ENABLED || !_sb || !SESS) return;
-   if(!navigator.onLine) return;
-   var ok = await _hasSupabaseSession();
-   if(!ok){
-      try{
-         var r = await _sb.auth.refreshSession();
-         ok = !!(r && r.data && r.data.session);
-      }catch(_){ ok = false; }
-   }
-   if(!ok){
-      console.warn('[Fluxy/AUTH] Sessao da nuvem expirada, forcando novo login para retomar sincronizacao.');
-   try{
-   var banner = document.createElement('div');
-   banner.textContent = 'Sessao expirada. Faca login novamente para sincronizar seus dados na nuvem.';
-   banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;text-align:center;padding:10px;font-weight:600;font-family:sans-serif;';
-   document.body.appendChild(banner);
-   }catch(_){}
-   setTimeout(function(){ doLogout(); }, 2500);
-   }
-   }
-   _verifyCloudSessionOnBoot();
-if(SESS){
-  // Carrega dados da nuvem quando disponível (Etapa 3+: clientes, produtos, pedidos, cobranças, rotas, usuários)
-  if(CLOUD_ENABLED) {
-    syncCloud('clis');
-    syncCloud('prods');
-    syncCloud('peds');
-    syncCloud('cobr');
-    syncCloud('rotas');
-    syncCloud('usuarios');
-    // O servidor é a fonte de verdade. Migração/fila legadas permanecem
-    // desativadas para não recriar registros a partir do armazenamento local.
-    _setupOfflineListeners();
+async function _bootFluxyOnlineOnly(){
+  if(!navigator.onLine){
+    _fluxyShowConnectionLock();
+    return;
   }
+  if(!SESS){
+    document.getElementById('login-wrap').style.display='flex';
+    return;
+  }
+  var ok=await _fluxyVerifyServerConnection();
+  if(!ok) return;
+  // Reconcile role, company and access status before rendering cached data.
+  await syncFluxySessionFromSupabase();
+  if(!SESS){
+    _fluxyHideConnectionLock();
+    document.getElementById('login-wrap').style.display='flex';
+    return;
+  }
+  await hydrateAllFromSb();
   showApp();
-} else {
-  document.getElementById('login-wrap').style.display = 'flex';
 }
+_bootFluxyOnlineOnly();
 
 
 // ═════════════════════════════════════════════════════════════���═
