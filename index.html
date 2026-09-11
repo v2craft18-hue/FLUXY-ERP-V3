@@ -3599,6 +3599,22 @@ function showResetMsg(txt,type){
     el.style.background='var(--greeng)'; el.style.border='1px solid rgba(16,185,129,.25)'; el.style.color='#6EE7B7';
   }
 }
+async function _fluxyFindAuthenticatedProfile(uid,email){
+  if(!_sb||!uid) return {data:null,error:{message:'Servidor indisponível.'}};
+  var byUid=await _sb.from('usuarios')
+    .select('id,nome,email,role,empresa_id,ativo,status,auth_uid')
+    .eq('auth_uid',uid).maybeSingle();
+  if(byUid.error) return byUid;
+  if(byUid.data) return byUid;
+  // Compatibility for legitimate older accounts created before auth_uid was
+  // stored in usuarios. The authenticated email is supplied by Supabase Auth;
+  // RLS still limits the visible row to the caller's own company.
+  var normalized=(email||'').trim().toLowerCase();
+  if(!normalized) return {data:null,error:null};
+  return await _sb.from('usuarios')
+    .select('id,nome,email,role,empresa_id,ativo,status,auth_uid')
+    .eq('email',normalized).maybeSingle();
+}
 async function doLogin(){
   if(!loginAllowed()) return;
   var email=(document.getElementById('lg-email').value||'').trim().toLowerCase();
@@ -3623,9 +3639,9 @@ async function doLogin(){
         var userId = null;
         // Buscar perfil para obter id/nome/role/empresa corretos
         try {
-          var { data: prof } = await _sb.from('usuarios')
-            .select('id,nome,role,empresa_id,ativo,status')
-            .eq('auth_uid', uid).maybeSingle();
+          var profileResult=await _fluxyFindAuthenticatedProfile(uid,email);
+          if(profileResult.error) throw profileResult.error;
+          var prof=profileResult.data;
           if(prof){
             userId=prof.id; nome=prof.nome||nome; role=prof.role||role; empresaId=prof.empresa_id||empresaId;
             if(prof.status==='desligado'){ await _sb.auth.signOut(); showErr('Seu acesso foi removido do sistema.'); return; }
@@ -3742,7 +3758,7 @@ async function syncFluxySessionFromSupabase(){
   // ativo e status podem mudar sem que o auth_uid ou o e-mail mudem.
   var prof = null;
   try{
-    var res = await _sb.from('usuarios').select('id,nome,role,empresa_id,ativo,status').eq('auth_uid', uid).maybeSingle();
+    var res = await _fluxyFindAuthenticatedProfile(uid,realEmail);
     if(res && res.error){
       console.warn('[Fluxy/SessionSync] Consulta do perfil falhou temporariamente:',res.error.message);
       return;
