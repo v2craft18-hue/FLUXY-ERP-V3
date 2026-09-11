@@ -31,10 +31,16 @@
     },
     {
       "src": "/config\\.js",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
       "dest": "/config.js"
     },
     {
       "src": "/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
       "dest": "/index.html"
     }
   ],

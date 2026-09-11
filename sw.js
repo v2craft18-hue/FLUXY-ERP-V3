@@ -4,8 +4,6 @@
 // This worker exists only to retire caches created by older deployments.
 // ══════════════════════════════════════════════════════════════════
 
-var CACHE_OLD_PREFIX = 'fluxy-v';
-
 // ── Install: pre-cache shell ──────────────────────────────────────
 self.addEventListener('install', function(e){
   self.skipWaiting();
@@ -16,8 +14,7 @@ self.addEventListener('activate', function(e){
   e.waitUntil(
     caches.keys().then(function(keys){
       return Promise.all(
-        keys.filter(function(k){ return k.startsWith(CACHE_OLD_PREFIX); })
-          .map(function(k){ return caches.delete(k); })
+        keys.map(function(k){ return caches.delete(k); })
       );
     }).then(function(){
       return self.clients.claim();

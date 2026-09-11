@@ -2868,6 +2868,8 @@ async function _hasSupabaseSession(){
 // from browser storage is not enough to unlock the ERP.
 var _fluxyOnlineVerified=false;
 var _fluxyOfflineListenersReady=false;
+var _fluxyLastServerCheck=0;
+var _fluxyReplayClick=null;
 function _fluxyShowConnectionLock(message){
   _fluxyOnlineVerified=false;
   var lock=document.getElementById('fluxy-connection-lock');
@@ -2898,6 +2900,7 @@ async function _fluxyVerifyServerConnection(){
     var result=await _sb.auth.getUser();
     var ok=!!(result && !result.error && result.data && result.data.user);
     _fluxyOnlineVerified=ok;
+    _fluxyLastServerCheck=ok?Date.now():0;
     if(ok) _fluxyHideConnectionLock();
     else _fluxyShowConnectionLock('Não foi possível confirmar sua sessão no servidor. Conecte-se e entre novamente.');
     return ok;
@@ -12959,12 +12962,41 @@ function _setupOfflineListeners(){
     console.log('[Fluxy] Conexão perdida — bloqueando acesso local');
     _fluxyShowConnectionLock();
   });
+
+  // Revalidate immediately when Android restores the tab/app from memory.
+  window.addEventListener('focus',function(){
+    if(SESS) _fluxyVerifyServerConnection().catch(function(){});
+  });
+  window.addEventListener('pageshow',function(){
+    if(SESS) _fluxyVerifyServerConnection().catch(function(){});
+  });
+  document.addEventListener('visibilitychange',function(){
+    if(!document.hidden && SESS) _fluxyVerifyServerConnection().catch(function(){});
+  });
+
+  // Mutating actions must be confirmed against Supabase immediately before
+  // execution. This also covers phones that report navigator.onLine=true
+  // while the internet is actually unreachable.
+  document.addEventListener('click',async function(ev){
+    if(!SESS) return;
+    var target=ev.target&&ev.target.closest?ev.target.closest('[onclick]'):null;
+    if(!target) return;
+    if(_fluxyReplayClick===target){ _fluxyReplayClick=null; return; }
+    var handler=target.getAttribute('onclick')||'';
+    if(!/(save|salv|delete|exclu|cancel|apro|recus|final|confirm|bloque|deslig|emit|criar|cadastr)/i.test(handler)) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    var ok=await _fluxyVerifyServerConnection();
+    if(!ok) return;
+    _fluxyReplayClick=target;
+    target.click();
+  },true);
   
-  // Heartbeat a cada 45s
+  // Heartbeat curto para bloquear rapidamente uma tela já aberta.
   setInterval(function(){
     if(!CLOUD_ENABLED||!_sb) return;
     _fluxyVerifyServerConnection().catch(function(){});
-  },APP_STATE.offline.checkInterval);
+  },10000);
 }
 
 function getQueueStatus(){
@@ -14303,7 +14335,7 @@ function pwaRegister(){
   }).catch(function(e){ console.warn('[Fluxy/PWA] falha ao remover Service Worker:',e); });
   if('caches' in window){
     caches.keys().then(function(keys){
-      return Promise.all(keys.filter(function(k){return k.indexOf('fluxy-')===0;}).map(function(k){return caches.delete(k);}));
+      return Promise.all(keys.map(function(k){return caches.delete(k);}));
     }).catch(function(e){ console.warn('[Fluxy/PWA] falha ao limpar cache antigo:',e); });
   }
   var updateBar=document.getElementById('pwa-update-bar');
