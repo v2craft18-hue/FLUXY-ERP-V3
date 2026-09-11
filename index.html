@@ -1275,6 +1275,22 @@ select option {
   .kpi-value, .kpi-val { font-size:15px!important; }
   .kpi-card { padding:9px 8px!important; }
 }
+
+/* Numeric cards need their full width on phones. Currency values must never
+   break in the middle of a number. Kept last to override legacy rules. */
+@media (max-width: 480px) {
+  #dash-kpis, #rel-kpis, #entr-kpis, #nf-kpis, #ger-kpis, #cobr-kpis {
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+  .kpi-value, .kpi-val, .stat-val {
+    white-space:nowrap!important;
+    overflow-wrap:normal!important;
+    word-break:normal!important;
+    max-width:100%!important;
+    font-size:clamp(16px,6.2vw,22px)!important;
+    letter-spacing:-.55px!important;
+  }
+}
 </style>
 
 <!-- ═══ Supabase SDK ═══ -->
@@ -2406,7 +2422,11 @@ function _usuarioToSb(userObj){
     nome:          userObj.nome || '',
     email:         userObj.email || '',
     role:          userObj.role || 'vend',
-    telefone:      userObj.telefone || ''
+    telefone:      userObj.telefone || '',
+    ativo:         userObj.ativo !== false,
+    status:        userObj.status || (userObj.ativo === false ? 'bloqueado' : 'ativo'),
+    deleted:       userObj.deleted === true,
+    deleted_at:    userObj.deleted === true ? (userObj.deletedAt || new Date().toISOString()) : null
   };
 }
 
@@ -2461,6 +2481,20 @@ async function loadUsuariosFromSb(){
   }
 }
 
+function _isUuid(value){
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value||'');
+}
+
+async function _usuarioResolveDbId(id){
+  if(!_sb || !SESS || !id) return { id:null, error:'Identificador de usuário ausente.' };
+  var query=_sb.from('usuarios').select('id').eq('empresa_id',SESS.empresaId);
+  query=_isUuid(id)?query.eq('id',id):query.eq('legacy_id',id);
+  var result=await query.maybeSingle();
+  if(result.error) return { id:null, error:result.error.message };
+  if(!result.data) return { id:null, error:'Usuário não encontrado na empresa.' };
+  return { id:result.data.id, error:null };
+}
+
 async function _usuarioUpsertSb(usuarioObj){
      // Insert ou update de usuário no Supabase (async)
      if(!CLOUD_ENABLED || !_sb || !SESS) return null;
@@ -2471,13 +2505,12 @@ async function _usuarioUpsertSb(usuarioObj){
        // Verifica se já existe um registro vinculado a este id local antes de decidir insert/update
        var existing = null;
        if(usuarioObj.id){
-         var achou = await _sb
-           .from('usuarios')
-           .select('id')
-           .or('id.eq.'+usuarioObj.id+',legacy_id.eq.'+usuarioObj.id)
-           .eq('empresa_id', SESS.empresaId)
-           .maybeSingle();
-         existing = achou.data;
+         var achou = await _usuarioResolveDbId(usuarioObj.id);
+         if(achou.error && achou.error!=='Usuário não encontrado na empresa.'){
+           console.error('[Fluxy/USU] Erro ao localizar usuário:',achou.error);
+           return null;
+         }
+         existing = achou.id ? {id:achou.id} : null;
    }
        // Upsert usuário
        var { data, error } = existing
@@ -2507,21 +2540,49 @@ async function _usuarioUpsertSb(usuarioObj){
 
 async function _usuarioDeleteSb(id){
   // Soft delete (deleted=true) no Supabase
-  if(!CLOUD_ENABLED || !_sb || !SESS || !id) return;
+  if(!CLOUD_ENABLED || !_sb || !SESS || !id) return { ok:false, error:'Sem conexão com o servidor.' };
   try {
+    var target=await _usuarioResolveDbId(id);
+    if(target.error) return { ok:false, error:target.error };
     var { error } = await _sb
       .from('usuarios')
       .update({ deleted: true, deleted_at: new Date().toISOString(), ativo: false, status: 'desligado' })
-      .or('id.eq.'+id+',legacy_id.eq.'+id)
+      .eq('id',target.id)
       .eq('empresa_id', SESS.empresaId);
     
     if(error) {
       console.error('[Fluxy/USU] Erro ao deletar usuário:', error.message);
-      return;
+      return { ok:false, error:error.message || 'Não foi possível excluir o usuário.' };
     }
     console.log('[Fluxy/USU] Usuário '+id+' marcado como deletado no Supabase');
+    return { ok:true };
   } catch(e) {
     console.error('[Fluxy/USU] Erro inesperado em _usuarioDeleteSb:', e.message);
+    return { ok:false, error:e.message || 'Falha de rede ao excluir o usuário.' };
+  }
+}
+
+async function _usuarioSetStatusSb(id, newStatus){
+  if(!CLOUD_ENABLED || !_sb || !SESS || !id) return { ok:false, error:'Sem conexão com o servidor.' };
+  try {
+    var ativo = newStatus === 'ativo';
+    var target=await _usuarioResolveDbId(id);
+    if(target.error) return { ok:false, error:target.error };
+    var result = await _sb
+      .from('usuarios')
+      .update({ ativo:ativo, status:newStatus })
+      .eq('id',target.id)
+      .eq('empresa_id', SESS.empresaId)
+      .select('id,ativo,status')
+      .maybeSingle();
+    if(result.error) return { ok:false, error:result.error.message || 'Não foi possível alterar o acesso.' };
+    if(!result.data) return { ok:false, error:'O servidor não confirmou a alteração. Verifique sua permissão.' };
+    if(result.data.status !== newStatus || result.data.ativo !== ativo){
+      return { ok:false, error:'O servidor retornou um estado diferente do solicitado.' };
+    }
+    return { ok:true, data:result.data };
+  } catch(e) {
+    return { ok:false, error:e.message || 'Falha de rede ao alterar o acesso.' };
   }
 }
 
@@ -3340,7 +3401,11 @@ function seedAdmin(){
         u.pwd=_factoryHash; u.status='ativo'; u.ativo=true; changed=true;
         console.warn('[Fluxy] seedAdmin: reset admin hash to factory default');
       }
-      if(!u.ativo||u.status==='bloqueado'){ u.ativo=true; u.status='ativo'; changed=true; }
+      // Nunca reative contas reais durante o boot. Apenas o usuário local de
+      // demonstração pode receber o estado padrão quando ainda não há nuvem.
+      if(!CLOUD_ENABLED && u.id==='adm1' && (!u.ativo||u.status==='bloqueado')){
+        u.ativo=true; u.status='ativo'; changed=true;
+      }
       break;
     }
   }
@@ -4534,6 +4599,14 @@ function sendNFWA(pedId){
   window.open(url,'_blank');
 }
 
+function _safeStoredView(v){
+  var allowed={dashboard:1,clientes:1,'nova-venda':1,pedidos:1,'meus-clientes':1,produtos:1,
+    relatorios:1,comissoes:1,notas:1,gerente:1,'cobranças':1,historico:1,usuarios:1,
+    rotas:1,perfil:1,suporte:1,configuracoes:1,notificacoes:1,onboarding:1,
+    financeiro:1,metas:1,catalogo:1,ranking:1};
+  return allowed[v]?v:'dashboard';
+}
+
 function showApp(){
   console.log('[v0-AUDIT] showApp() START');
   document.getElementById('login-wrap').style.display = 'none';
@@ -4545,14 +4618,17 @@ function showApp(){
   applyRoleNav();
   // Estratégia A: hidrata do Supabase e re-renderiza a view atual ao concluir.
   // Render imediato vem do cache (localStorage); hidratação atualiza depois.
+  var _viewKey='fluxy:last-view:'+(SESS&&SESS.empresaId?SESS.empresaId:'sem-empresa')+':'+(SESS&&SESS.userId?SESS.userId:'sem-usuario');
+  var _restoreView='dashboard';
+  try { _restoreView=_safeStoredView(sessionStorage.getItem(_viewKey)||'dashboard'); } catch(e) {}
   if(typeof hydrateAllFromSb==='function'){
     hydrateAllFromSb().then(function(){
       try { if(typeof currentView!=='undefined' && currentView) go(currentView); } catch(e){}
     });
   }
-  console.log('[v0-AUDIT] showApp() calling go(dashboard)');
-  go('dashboard');
-  console.log('[v0-AUDIT] showApp() go(dashboard) returned, calling setTimeout fluxyLayoutDiag');
+  console.log('[v0-AUDIT] showApp() restoring view:',_restoreView);
+  go(_restoreView);
+  console.log('[v0-AUDIT] showApp() initial view returned, calling setTimeout fluxyLayoutDiag');
   setTimeout(fluxyLayoutDiag, 400);
   console.log('[v0-AUDIT] showApp() END');
 }
@@ -5276,6 +5352,11 @@ function go(v){
   _flog('nav','→ '+v+' (token:'+CURRENT_VIEW_TOKEN+')');
   currentView = v;
   APP_STATE.ui.currentView = v;
+  if(SESS && v!=='signup' && v!=='reset-pwd'){
+    try {
+      sessionStorage.setItem('fluxy:last-view:'+(SESS.empresaId||'sem-empresa')+':'+(SESS.userId||'sem-usuario'),v);
+    } catch(e) {}
+  }
   if(!APP_STATE.ui[v]||typeof APP_STATE.ui[v]!=='object') APP_STATE.ui[v]={};
   closeMob();
 
@@ -12193,8 +12274,16 @@ async function saveUser(editId){
     users[j].nome=nome;users[j].email=email;users[j].telefone=tel;users[j].role=role;
     users[j].ativo=newStatus==='ativo';users[j].status=newStatus;break;
   }
+  var editado=users.find(function(x){return x.id===editId;});
+  var estadoAnterior=getUsers();
+  if(!(CLOUD_ENABLED&&_sb)){fail('Sem conexão com o servidor. A alteração não foi salva.');return;}
+  var salvo=await _usuarioUpsertSb(editado);
+  if(!salvo){
+    saveUsers(estadoAnterior);
+    fail('O servidor não confirmou a alteração. Nada foi modificado.');
+    return;
+  }
   saveUsers(users);
-  if(CLOUD_ENABLED) await _usuarioUpsertSb(users.find(function(x){return x.id===editId;}));
   logHist('Editou usuário',nome+' ('+roleLabel(role)+') status: '+newStatus);
   closeModal();safeRender('usuarios',renderUsuarios);toast('✅ Usuário salvo!');busyUnlock('saveUser');
 }
@@ -12238,23 +12327,24 @@ async function doResetPwd(id){
   busyUnlock('doResetPwd');
 }
 
-function confirmDeleteUser(id){
+async function confirmDeleteUser(id){
   if(!busyLock('deleteUser')) return;
-  if(!isAdm()){toast('Sem permissão.');return;}
-  if(SESS&&SESS.userId===id){toast('Não é possível excluir a própria conta.');return;}
+  if(!isAdm()){busyUnlock('deleteUser');toast('Sem permissão.');return;}
+  if(SESS&&SESS.userId===id){busyUnlock('deleteUser');toast('Não é possível excluir a própria conta.');return;}
   var users=getUsers();
   var target=null; var idx=-1;
   for(var i=0;i<users.length;i++) if(users[i].id===id){target=users[i];idx=i;break;}
-  if(!target||idx<0) return;
+  if(!target||idx<0){busyUnlock('deleteUser');return;}
   var admins=users.filter(function(u){return u.role==='adm';});
-  if(target.role==='adm'&&admins.length<=1){toast('Não é possível excluir o único administrador.','err');return;}
+  if(target.role==='adm'&&admins.length<=1){busyUnlock('deleteUser');toast('Não é possível excluir o único administrador.','err');return;}
+  if(!(CLOUD_ENABLED&&_sb)){busyUnlock('deleteUser');toast('Sem conexão com o servidor. A exclusão não foi realizada.','err');return;}
   // Soft delete em lugar de hard delete
   users[idx].deleted=true;
   users[idx].deletedAt=new Date().toISOString();
    users[idx].ativo=false; users[idx].status='desligado';
+  var delResult=await _usuarioDeleteSb(id);
+  if(!delResult||!delResult.ok){busyUnlock('deleteUser');toast('Erro ao excluir: '+((delResult&&delResult.error)||'servidor não confirmou a exclusão.'),'err');return;}
   saveUsers(users);
-  // Sincroniza exclusão com Supabase (async, sem bloquear)
-  if(CLOUD_ENABLED && id) _usuarioDeleteSb(id).catch(function(e){ console.error('[Fluxy/USU] erro em _usuarioDeleteSb:', e); });
   logHist('Excluiu usuário', target.nome+' ('+target.email+')');
   closeModal();
   safeRender('usuarios',renderUsuarios);
@@ -12277,10 +12367,12 @@ function toggleUser(id){
   safeRender('usuarios',renderUsuarios);
 }
 
-function setUserStatus(id,newStatus){
+async function setUserStatus(id,newStatus){
   if(!id||!newStatus) return;
   // Protect self
   if(SESS&&id===SESS.userId){toast('Não é possível alterar o próprio acesso.');return;}
+  if(!(CLOUD_ENABLED&&_sb)){toast('Sem conexão com o servidor. O acesso não foi alterado.','err');return;}
+  if(!busyLock('setUserStatus')) return;
   var users=getUsers();
   var nome='';
   for(var i=0;i<users.length;i++){
@@ -12291,11 +12383,18 @@ function setUserStatus(id,newStatus){
       break;
     }
   }
+  var result=await _usuarioSetStatusSb(id,newStatus);
+  if(!result||!result.ok){
+    busyUnlock('setUserStatus');
+    toast('Erro ao alterar acesso: '+((result&&result.error)||'servidor não confirmou a alteração.'),'err');
+    return;
+  }
   saveUsers(users);
   var labels={ativo:'reativado',bloqueado:'bloqueado',desligado:'desligado'};
   logHist('Acesso '+( labels[newStatus]||newStatus), nome);
   safeRender('usuarios',renderUsuarios);
   toast(newStatus==='ativo'?'✅ Acesso reativado!':newStatus==='bloqueado'?'🚫 Acesso bloqueado!':'❌ Acesso removido!');
+  busyUnlock('setUserStatus');
 }
 
 // ══════════════════════════════════════════════════════════��
