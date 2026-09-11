@@ -14311,13 +14311,26 @@ async function _bootFluxyOnlineOnly(){
     _fluxyShowConnectionLock();
     return;
   }
-  if(!SESS){
+  // Supabase Auth is authoritative. Even when the auxiliary Fluxy session is
+  // missing, first restore the persisted Supabase session and rebuild SESS.
+  var authSession=null;
+  try{
+    var authResult=await _sb.auth.getSession();
+    authSession=authResult&&authResult.data&&authResult.data.session;
+  }catch(e){
+    _fluxyShowConnectionLock('Não foi possível confirmar sua sessão no servidor. Tente novamente.');
+    return;
+  }
+  if(!authSession){
+    SESS=null;
+    APP_STATE.session=null;
     document.getElementById('login-wrap').style.display='flex';
     return;
   }
   var ok=await _fluxyVerifyServerConnection();
   if(!ok) return;
-  // Reconcile role, company and access status before rendering cached data.
+  // Rebuilds SESS from the authenticated profile when local UI state was lost,
+  // then reconciles role, company and access status before rendering.
   await syncFluxySessionFromSupabase();
   if(!SESS){
     _fluxyHideConnectionLock();
