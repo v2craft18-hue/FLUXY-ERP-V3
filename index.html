@@ -3743,6 +3743,10 @@ async function syncFluxySessionFromSupabase(){
   var prof = null;
   try{
     var res = await _sb.from('usuarios').select('id,nome,role,empresa_id,ativo,status').eq('auth_uid', uid).maybeSingle();
+    if(res && res.error){
+      console.warn('[Fluxy/SessionSync] Consulta do perfil falhou temporariamente:',res.error.message);
+      return;
+    }
     prof = res && res.data;
   }catch(e){
     console.warn('[Fluxy/SessionSync] Falha ao consultar perfil real:', e && e.message);
@@ -4676,7 +4680,9 @@ function showApp(){
   // Render imediato vem do cache (localStorage); hidratação atualiza depois.
   var _viewKey='fluxy:last-view:'+(SESS&&SESS.empresaId?SESS.empresaId:'sem-empresa')+':'+(SESS&&SESS.userId?SESS.userId:'sem-usuario');
   var _restoreView='dashboard';
-  try { _restoreView=_safeStoredView(sessionStorage.getItem(_viewKey)||'dashboard'); } catch(e) {}
+  try {
+    _restoreView=_safeStoredView(sessionStorage.getItem(_viewKey)||localStorage.getItem(_viewKey)||'dashboard');
+  } catch(e) {}
   if(typeof hydrateAllFromSb==='function'){
     hydrateAllFromSb().then(function(){
       try { if(typeof currentView!=='undefined' && currentView) go(currentView); } catch(e){}
@@ -5411,7 +5417,9 @@ function go(v){
   APP_STATE.ui.currentView = v;
   if(SESS && v!=='signup' && v!=='reset-pwd'){
     try {
-      sessionStorage.setItem('fluxy:last-view:'+(SESS.empresaId||'sem-empresa')+':'+(SESS.userId||'sem-usuario'),v);
+      var _lastViewKey='fluxy:last-view:'+(SESS.empresaId||'sem-empresa')+':'+(SESS.userId||'sem-usuario');
+      sessionStorage.setItem(_lastViewKey,v);
+      localStorage.setItem(_lastViewKey,v);
     } catch(e) {}
   }
   if(!APP_STATE.ui[v]||typeof APP_STATE.ui[v]!=='object') APP_STATE.ui[v]={};
@@ -14256,7 +14264,15 @@ async function _confirmFirstAccess(){
 }
 window._confirmFirstAccess = _confirmFirstAccess;
 if(_sb){
-  _sb.auth.onAuthStateChange(function(event){ if(event === 'PASSWORD_RECOVERY'){ _showFirstAccessModal(); } else if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED'){ _fluxyScheduleSessionSync(); } });
+  _sb.auth.onAuthStateChange(function(event){
+    if(event === 'PASSWORD_RECOVERY'){
+      _showFirstAccessModal();
+    } else if(event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED'){
+      // INITIAL_SESSION is handled by _bootFluxyOnlineOnly. Scheduling another
+      // reconciliation during reload created a race that could return to login.
+      _fluxyScheduleSessionSync();
+    }
+  });
 }
 window.addEventListener('hashchange', _fluxyCheckPasswordRecovery);
 _fluxyCheckPasswordRecovery();
