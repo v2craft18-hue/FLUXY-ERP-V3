@@ -3730,10 +3730,10 @@ async function syncFluxySessionFromSupabase(){
     var lw = document.getElementById('login-wrap'); if(lw) lw.style.display = 'flex';
   }
   if(!realSession || !realSession.user){
-    if(SESS){
-      console.warn('[Fluxy/SessionSync] Supabase sem sessao ativa; limpando sessao local do Fluxy.');
-      _fluxyClearLocalSession();
-    }
+    // During page refresh Supabase may still be restoring its persisted token.
+    // Never erase the Fluxy session during that initialization race. Boot will
+    // keep the ERP locked until the server confirms the authentication.
+    console.warn('[Fluxy/SessionSync] Sessao Supabase ainda nao restaurada; mantendo acesso bloqueado.');
     return;
   }
   var uid = realSession.user.id;
@@ -14271,15 +14271,9 @@ _fluxyCheckPasswordRecovery();
 seedAdmin();
 seed();
 loadSession();
-_fluxyScheduleSessionSync();
 _setupOfflineListeners();
-// Supabase is the source of truth: a cached local session must never open the ERP offline.
-if(SESS && !navigator.onLine){
-  SESS=null;
-  APP_STATE.session=null;
-  APP_STATE.set('auth.logged',false);
-  stor_set(KEYS.sess,null);
-}
+// Keep the persisted identity while offline, but never unlock the ERP until
+// Supabase confirms it. This avoids forcing a new login after every refresh.
 async function _bootFluxyOnlineOnly(){
   if(!navigator.onLine){
     _fluxyShowConnectionLock();
