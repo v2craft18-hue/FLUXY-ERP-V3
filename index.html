@@ -3606,6 +3606,18 @@ async function _fluxyFindAuthenticatedProfile(uid,email){
     .eq('auth_uid',uid).maybeSingle();
   if(byUid.error) return byUid;
   if(byUid.data) return byUid;
+  // Compatibility for accounts linked through the server-side auth map.
+  // Never trusts company or role supplied by the frontend.
+  var mapped=await _sb.from('usuarios_auth_map')
+    .select('usuario_id')
+    .eq('auth_uid',uid).maybeSingle();
+  if(!mapped.error && mapped.data && mapped.data.usuario_id){
+    var byMap=await _sb.from('usuarios')
+      .select('id,nome,email,role,empresa_id,ativo,status,auth_uid')
+      .eq('id',mapped.data.usuario_id).maybeSingle();
+    if(byMap.data) return byMap;
+    if(byMap.error) return byMap;
+  }
   // Compatibility for legitimate older accounts created before auth_uid was
   // stored in usuarios. The authenticated email is supplied by Supabase Auth;
   // RLS still limits the visible row to the caller's own company.
@@ -14207,8 +14219,33 @@ if(window.FLUXY_BLOCKED){ console.error('[Fluxy] Ambiente não reconhecido — S
     console.error('[Fluxy] ✗ ANON KEY NÃO CONFIGURADA — abra o index.html, procure por SBKEY e cole a anon key do projeto (Dashboard → Project Settings → API). Sem ela o sistema opera apenas em localStorage.');
   } else {
     try {
+      var _fluxyAuthStorage = {
+        getItem: function(key){
+          try{
+            var primary = localStorage.getItem(key);
+            return primary !== null ? primary : sessionStorage.getItem(key);
+          }catch(e){
+            try{return sessionStorage.getItem(key);}catch(_e){return null;}
+          }
+        },
+        setItem: function(key,value){
+          var saved = false;
+          try{localStorage.setItem(key,value); saved = true;}catch(e){}
+          try{sessionStorage.setItem(key,value); saved = true;}catch(e){}
+          if(!saved) throw new Error('Não foi possível persistir a sessão.');
+        },
+        removeItem: function(key){
+          try{localStorage.removeItem(key);}catch(e){}
+          try{sessionStorage.removeItem(key);}catch(e){}
+        }
+      };
       window._sb = supabase.createClient(SBURL, SBKEY, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: false,
+          storage: _fluxyAuthStorage
+        }
       });
       console.log('[Fluxy] ✓ Supabase init - projeto:', SBURL.substring(8,30) + '...');
       enableCloudSync('supabase', { url: SBURL, key: SBKEY });
@@ -14315,8 +14352,16 @@ async function _bootFluxyOnlineOnly(){
   // missing, first restore the persisted Supabase session and rebuild SESS.
   var authSession=null;
   try{
-    var authResult=await _sb.auth.getSession();
-    authSession=authResult&&authResult.data&&authResult.data.session;
+    // On some mobile browsers the persisted Supabase session is restored a
+    // fraction of a second after the page script starts. Retry before showing
+    // the login screen so a normal refresh does not look like a logout.
+    for(var authTry=0; authTry<4 && !authSession; authTry++){
+      var authResult=await _sb.auth.getSession();
+      authSession=authResult&&authResult.data&&authResult.data.session;
+      if(!authSession && authTry<3){
+        await new Promise(function(resolve){setTimeout(resolve,250);});
+      }
+    }
   }catch(e){
     _fluxyShowConnectionLock('Não foi possível confirmar sua sessão no servidor. Tente novamente.');
     return;
